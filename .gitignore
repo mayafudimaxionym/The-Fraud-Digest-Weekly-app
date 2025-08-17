@@ -16,3 +16,6 @@ env/
 # IDEs
 .vscode/
 .idea/
+
+# Credentials
+gcp-credentials.json

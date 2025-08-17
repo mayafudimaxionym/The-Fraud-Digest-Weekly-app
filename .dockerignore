@@ -1,0 +1,27 @@
+# .dockerignore
+
+# Version control metadata
+.git
+.gitignore
+
+# Python specific
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.venv/
+venv/
+
+# Secrets - DO NOT ADD TO IMAGE
+.env
+*.env
+
+# IDE and OS specific files
+.idea/
+.vscode/
+.DS_Store
+
+# Docker files - these are used to build the image, not needed inside it
+Dockerfile
+.dockerignore
