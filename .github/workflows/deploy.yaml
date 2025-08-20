@@ -40,8 +40,11 @@
            source_dir: ./backend
            entry_point: main
            # gen2: true
+
            event_trigger_type: google.cloud.pubsub.topic.v1.messagePublished
-           event_trigger_pubsub_topic: projects/${{ env.PROJECT_ID }}/topics/analysis-requests
+           event_trigger_resource: projects/${{ env.PROJECT_ID }}/topics/analysis-requests
+           event_trigger_service_account: eventarc-trigger-sa@${{ env.PROJECT_ID }}.iam.gserviceaccount.com
+
 
 
            #event_trigger_type: google.cloud.pubsub.topic.v1.messagePublished
