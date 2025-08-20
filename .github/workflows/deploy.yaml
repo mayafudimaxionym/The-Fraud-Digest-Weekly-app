@@ -32,7 +32,7 @@
            service_account: 'github-actions-deployer@fraud-digest-app-v2-469310.iam.gserviceaccount.com'
 
        - name: Deploy Cloud Function
-         uses: google-github-actions/deploy-cloud-functions@v2
+         uses: google-github-actions/deploy-cloud-functions@main
          with:
            name: fraud-analysis-processor
            region: ${{ env.REGION }}
@@ -42,10 +42,10 @@
            gen2: true
 
            event_trigger_type: google.cloud.pubsub.topic.v1.messagePublished
-           event_trigger_filters: "topic=analysis-requests"
+           event_trigger_resource: projects/${{ env.PROJECT_ID }}/topics/analysis-requests
 
-           build_worker_pool: projects/${{ env.PROJECT_ID }}/locations/${{ env.REGION }}/workerPools/europe-west1-pool
-           docker_registry: artifact-registry
+           #build_worker_pool: projects/${{ env.PROJECT_ID }}/locations/${{ env.REGION }}/workerPools/europe-west1-pool
+           #docker_registry: artifact-registry
 
    # Uncomment the following job to deploy the frontend Streamlit app when ready
    # JOB 2: Deploy the Frontend Streamlit App (we will enable this later)
