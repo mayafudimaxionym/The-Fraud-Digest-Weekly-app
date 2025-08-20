@@ -41,9 +41,10 @@
            entry_point: main
            trigger_topic: analysis-requests
            gen2: true
-           build_worker_pool: projects/${{ env.PROJECT_ID }}/locations/${{ env.REGION }}/workerPools/default
+           build_worker_pool: projects/${{ env.PROJECT_ID }}/locations/${{ env.REGION }}/workerPools/europe-west1-pool
            docker_registry: artifact-registry
 
+   # Uncomment the following job to deploy the frontend Streamlit app when ready
    # JOB 2: Deploy the Frontend Streamlit App (we will enable this later)
    # deploy-frontend:
    #   name: Deploy Frontend to Cloud Run
