@@ -41,6 +41,8 @@
            entry_point: main
            trigger_topic: analysis-requests
            gen2: true
+           build_worker_pool: projects/${{ env.PROJECT_ID }}/locations/${{ env.REGION }}/workerPools/default
+           docker_registry: artifact-registry
 
    # JOB 2: Deploy the Frontend Streamlit App (we will enable this later)
    # deploy-frontend:
