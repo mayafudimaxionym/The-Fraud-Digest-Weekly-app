@@ -9,7 +9,7 @@ import functions_framework
  # Global variables to hold loaded models, etc.
  # This helps to avoid reloading on every function invocation.
 nlp = None
- 
+    # Function to download and load the spaCy model.
 def download_and_load_spacy_model():
      """Loads the spaCy model into memory."""
      global nlp
@@ -19,7 +19,8 @@ def download_and_load_spacy_model():
          spacy.cli.download("en_core_web_sm")
          nlp = spacy.load("en_core_web_sm")
          print("Model loaded successfully.")
- 
+
+#  Function to fetch and extract text from a URL.
 def get_article_text(url):
      """Fetches and extracts text content from a given URL."""
      try:
@@ -32,7 +33,8 @@ def get_article_text(url):
      except requests.exceptions.RequestException as e:
          print(f"Error fetching URL {url}: {e}")
          return None
- 
+
+# Function to extract named entities from text using spaCy.
 def extract_entities(text):
      """Extracts named entities from text."""
      if not text:
