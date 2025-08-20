@@ -1,9 +1,9 @@
 # backend/main.py
 
 import base64
-import json
 import logging
 import sys
+import re
 import requests
 from bs4 import BeautifulSoup
 import spacy
@@ -11,7 +11,6 @@ import spacy
 import functions_framework
 
 # --- Logging Setup ---
-# This will ensure that logs are formatted correctly for Cloud Logging
 logging.basicConfig(stream=sys.stdout, level=logging.INFO,
                     format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -19,21 +18,20 @@ logging.basicConfig(stream=sys.stdout, level=logging.INFO,
 nlp = None
 
 def download_and_load_spacy_model():
-    """Loads the spaCy model into memory if it's not already loaded."""
+    # ... (остальной код этой функции не меняется)
     global nlp
     if nlp is None:
         logging.info("Cold start: Loading spaCy model...")
         try:
-            # In Cloud Functions, /tmp is the only writable directory
             spacy.cli.download("en_core_web_sm")
             nlp = spacy.load("en_core_web_sm")
             logging.info("Model loaded successfully.")
         except Exception as e:
             logging.error(f"Failed to load spaCy model: {e}", exc_info=True)
-            raise  # Re-raise the exception to fail the function invocation
+            raise
 
 def get_article_text(url):
-    """Fetches and extracts text content from a given URL."""
+    # ... (остальной код этой функции не меняется)
     logging.info(f"Fetching text from URL: {url}")
     try:
         response = requests.get(url, timeout=15)
@@ -48,7 +46,7 @@ def get_article_text(url):
         return None
 
 def extract_entities(text):
-    """Extracts named entities from text."""
+    # ... (остальной код этой функции не меняется)
     if not text:
         return []
     logging.info("Extracting entities...")
@@ -57,15 +55,32 @@ def extract_entities(text):
     logging.info(f"Found {len(entities)} entities.")
     return entities
 
+def parse_message_safely(message_str):
+    """
+    A robust parser that handles malformed JSON-like strings.
+    It uses regular expressions to find the URL and email.
+    """
+    logging.info(f"Attempting to parse message: {message_str}")
+    
+    # Regex to find url and email
+    url_match = re.search(r"url:\s*['\"]?(.*?)['\"]?[\s,}]", message_str)
+    email_match = re.search(r"email:\s*['\"]?(.*?)['\"]?[\s,}]", message_str)
+    
+    url = url_match.group(1) if url_match else None
+    email = email_match.group(1) if email_match else None
+    
+    if url and email:
+        logging.info(f"Successfully parsed with regex: url={url}, email={email}")
+        return {"url": url, "email": email}
+    else:
+        logging.error(f"Failed to parse URL and/or email from message: {message_str}")
+        return None
+
 @functions_framework.cloud_event
 def main(cloud_event):
-    """
-    This function is triggered by a message published to a Pub/Sub topic.
-    """
     logging.info("Function execution started.")
     
     try:
-        # Ensure the spaCy model is loaded before use. This handles cold starts.
         download_and_load_spacy_model()
 
         message_data_encoded = cloud_event.data.get("message", {}).get("data")
@@ -74,34 +89,28 @@ def main(cloud_event):
             return
 
         message_data = base64.b64decode(message_data_encoded).decode("utf-8")
-        logging.info(f"Received message: {message_data}")
+        
+        # Use the new, safe parser instead of json.loads()
+        data = parse_message_safely(message_data)
+        if not data:
+            return
 
-        data = json.loads(message_data)
         url = data.get("url")
         email = data.get("email")
-
-        if not url or not email:
-            logging.error(f"'url' or 'email' not found in message: {data}")
-            return
 
         logging.info(f"Processing request for user: {email}")
         
         article_text = get_article_text(url)
         if not article_text:
-            # TODO: Send a failure email to the user.
             logging.warning(f"Could not retrieve text from {url}. Aborting.")
             return
         
         entities = extract_entities(article_text)
         
-        # For now, just log the entities.
         logging.info(f"Extracted entities: {entities}")
 
-        # TODO: Implement email sending logic here using Gmail API.
         logging.info(f"TODO: Send results to {email}")
 
-    except json.JSONDecodeError:
-        logging.error(f"Invalid JSON in message: {message_data}", exc_info=True)
     except Exception as e:
         logging.error(f"An unexpected error occurred: {e}", exc_info=True)
     
