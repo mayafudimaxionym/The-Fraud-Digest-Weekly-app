@@ -40,10 +40,10 @@
            source_dir: ./backend
            entry_point: main
            gen2: true
+
            event_trigger_type: google.cloud.pubsub.topic.v1.messagePublished
-           event_trigger_filters:
-            - attribute: "topic"
-              value: "analysis-requests"
+           event_trigger_filters: "topic=analysis-requests"
+
            build_worker_pool: projects/${{ env.PROJECT_ID }}/locations/${{ env.REGION }}/workerPools/europe-west1-pool
            docker_registry: artifact-registry
 
