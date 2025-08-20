@@ -1,16 +1,16 @@
- import base64
- import json
- import requests
- from bs4 import BeautifulSoup
- import spacy
+import base64
+import json
+import requests
+from bs4 import BeautifulSoup
+import spacy
  
- import functions_framework
+import functions_framework
  
  # Global variables to hold loaded models, etc.
  # This helps to avoid reloading on every function invocation.
- nlp = None
+nlp = None
  
- def download_and_load_spacy_model():
+def download_and_load_spacy_model():
      """Loads the spaCy model into memory."""
      global nlp
      if nlp is None:
@@ -20,7 +20,7 @@
          nlp = spacy.load("en_core_web_sm")
          print("Model loaded successfully.")
  
- def get_article_text(url):
+def get_article_text(url):
      """Fetches and extracts text content from a given URL."""
      try:
          response = requests.get(url, timeout=15)
@@ -33,7 +33,7 @@
          print(f"Error fetching URL {url}: {e}")
          return None
  
- def extract_entities(text):
+def extract_entities(text):
      """Extracts named entities from text."""
      if not text:
          return []
@@ -41,8 +41,8 @@
      return [(ent.text, ent.label_) for ent in doc.ents]
  
  # This decorator registers the function to be triggered by Pub/Sub messages.
- @functions_framework.cloud_event
- def main(cloud_event):
+@functions_framework.cloud_event
+def main(cloud_event):
      """
      This function is triggered by a message published to a Pub/Sub topic.
      """
