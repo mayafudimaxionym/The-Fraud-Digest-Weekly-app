@@ -39,6 +39,7 @@
            runtime: python310
            source_dir: ./backend
            entry_point: main
+           memory: 512Mi
            gen2: true
 
 
