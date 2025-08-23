@@ -1,96 +1,67 @@
- # .github/workflows/deploy.yaml
+# .github/workflows/deploy.yaml
 
- name: Deploy Services to Google Cloud
+name: Deploy Services to Google Cloud
 
- on:
-   push:
-     branches:
-       - main
+on:
+  push:
+    branches:
+      - main
 
- env:
-   PROJECT_ID: fraud-digest-app-v2-469310
-   REGION: europe-west1
+env:
+  PROJECT_ID: fraud-digest-app-v2-469310
+  REGION: europe-west1
+  SERVICE_NAME: fraud-analysis-processor-v2 # Using v2 to ensure a clean deploy
+  TOPIC_NAME: analysis-requests
+  TRIGGER_NAME: fraud-analysis-processor-v2-trigger
+  TRIGGER_SA: eventarc-trigger-sa@fraud-digest-app-v2-469310.iam.gserviceaccount.com
 
- jobs:
-   # JOB 1: Deploy the Backend Cloud Function
-   deploy-backend:
-     name: Deploy Backend Function
-     runs-on: ubuntu-latest
+jobs:
+  deploy-backend:
+    name: Deploy Backend Function and Trigger
+    runs-on: ubuntu-latest
 
-     permissions:
-       contents: 'read'
-       id-token: 'write'
+    permissions:
+      contents: 'read'
+      id-token: 'write'
 
-     steps:
-       - name: Checkout repository
-         uses: actions/checkout@v4
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-       - name: Authenticate to Google Cloud
-         uses: google-github-actions/auth@v2
-         with:
-           workload_identity_provider: 'projects/963241002796/locations/global/workloadIdentityPools/github-pool/providers/github-provider'
-           service_account: 'github-actions-deployer@fraud-digest-app-v2-469310.iam.gserviceaccount.com'
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: 'projects/963241002796/locations/global/workloadIdentityPools/github-pool/providers/github-provider'
+          service_account: 'github-actions-deployer@fraud-digest-app-v2-469310.iam.gserviceaccount.com'
 
-       - name: Deploy Cloud Function
-         uses: google-github-actions/deploy-cloud-functions@main
-         with:
-           name: fraud-analysis-processor-v2
-           replace: true
-           region: ${{ env.REGION }}
-           runtime: python310
-           source_dir: ./backend
-           entry_point: main
-           memory: 512Mi
-           gen2: true
+      - name: Deploy Cloud Function
+        id: deploy_function
+        uses: google-github-actions/deploy-cloud-functions@main
+        with:
+          name: ${{ env.SERVICE_NAME }}
+          region: ${{ env.REGION }}
+          runtime: python310
+          source_dir: ./backend
+          entry_point: main
+          gen2: true
+          ingress_settings: 'ALLOW_INTERNAL_ONLY'
+          all_traffic_on_latest_revision: true
 
+      - name: Set up gcloud CLI
+        uses: google-github-actions/setup-gcloud@main
 
-           #event_trigger_type: google.cloud.pubsub.topic.v1.messagePublished
-           #event_trigger_resource: projects/${{ env.PROJECT_ID }}/topics/analysis-requests
-           #event_trigger_service_account: eventarc-trigger-sa@${{ env.PROJECT_ID }}.iam.gserviceaccount.com
-
-           ingress_settings: 'ALLOW_INTERNAL_ONLY'
-           all_traffic_on_latest_revision: true
-
-           #event_trigger_type: google.cloud.pubsub.topic.v1.messagePublished
-           #event_trigger_resource: projects/${{ env.PROJECT_ID }}/topics/analysis-requests
-
-           #build_worker_pool: projects/${{ env.PROJECT_ID }}/locations/${{ env.REGION }}/workerPools/europe-west1-pool
-           #docker_registry: artifact-registry
-
-   # Uncomment the following job to deploy the frontend Streamlit app when ready
-   # JOB 2: Deploy the Frontend Streamlit App (we will enable this later)
-   # deploy-frontend:
-   #   name: Deploy Frontend to Cloud Run
-   #   runs-on: ubuntu-latest
-   #   needs: deploy-backend # Run after backend is deployed
-   #
-   #   permissions:
-   #     contents: 'read'
-   #     id-token: 'write'
-   #
-   #   steps:
-   #     - name: Checkout repository
-   #       uses: actions/checkout@v4
-   #
-   #     - name: Authenticate to Google Cloud
-   #       uses: google-github-actions/auth@v2
-   #       with:
-   #         workload_identity_provider: 'projects/963241002796/locations/global/workloadIdentityPools/github-pool/providers/github-provider'
-   #         service_account: 'github-actions-deployer@fraud-digest-app-v2-469310.iam.gserviceaccount.com'
-   #
-   #     - name: Set up Cloud SDK
-   #       uses: google-github-actions/setup-gcloud@v2
-   #
-   #     - name: Build and push Docker image
-   #       run: |-
-   #         docker build -t ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/fraud-digest-repo/the-fraud-digest-weekly-app:latest .
-   #         gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev
-   #         docker push ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/fraud-digest-repo/the-fraud-digest-weekly-app:latest
-   #
-   #     - name: Deploy to Cloud Run
-   #       run: |-
-   #         gcloud run deploy fraud-digest-weekly-app \
-   #           --image=${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/fraud-digest-repo/the-fraud-digest-weekly-app:latest \
-   #           --region=${{ env.REGION }} \
-   #           --platform=managed \
-   #           --quiet
+      - name: Create or Update Eventarc Trigger
+        run: |
+          gcloud eventarc triggers describe ${{ env.TRIGGER_NAME }} \
+            --project=${{ env.PROJECT_ID }} \
+            --location=${{ env.REGION }} && \
+          echo "Trigger already exists. No action needed." || \
+          gcloud eventarc triggers create ${{ env.TRIGGER_NAME }} \
+            --project=${{ env.PROJECT_ID }} \
+            --location=${{ env.REGION }} \
+            --destination-run-service=${{ env.SERVICE_NAME }} \
+            --destination-run-region=${{ env.REGION }} \
+            --event-filters="type=google.cloud.pubsub.topic.v1.messagePublished" \
+            --event-filters="topic=${{ env.TOPIC_NAME }}" \
+            --service-account=${{ env.TRIGGER_SA }}
+            
