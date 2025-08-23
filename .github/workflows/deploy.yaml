@@ -34,7 +34,8 @@
        - name: Deploy Cloud Function
          uses: google-github-actions/deploy-cloud-functions@main
          with:
-           name: fraud-analysis-processor
+           name: fraud-analysis-processor-v2
+           replace: true
            region: ${{ env.REGION }}
            runtime: python310
            source_dir: ./backend
