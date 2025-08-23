@@ -61,7 +61,6 @@ jobs:
             --location=${{ env.REGION }} \
             --destination-run-service=${{ env.SERVICE_NAME }} \
             --destination-run-region=${{ env.REGION }} \
-            --event-filters="type=google.cloud.pubsub.topic.v1.messagePublished" \
-            --event-filters="topic=${{ env.TOPIC_NAME }}" \
+            --transport-topic=${{ env.TOPIC_NAME }} \
             --service-account=${{ env.TRIGGER_SA }}
-            
+
