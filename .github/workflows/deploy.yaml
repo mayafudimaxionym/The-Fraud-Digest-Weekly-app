@@ -48,7 +48,8 @@ jobs:
           all_traffic_on_latest_revision: true
 
       - name: Set up gcloud CLI
-        uses: google-github-actions/setup-gcloud@main
+        uses: google-github-actions/setup-gcloud@v2
+
 
       - name: Create or Update Eventarc Trigger
         run: |
@@ -61,6 +62,8 @@ jobs:
             --location=${{ env.REGION }} \
             --destination-run-service=${{ env.SERVICE_NAME }} \
             --destination-run-region=${{ env.REGION }} \
+            --event-filters="type=google.cloud.pubsub.topic.v1.messagePublished" \
             --transport-topic=${{ env.TOPIC_NAME }} \
             --service-account=${{ env.TRIGGER_SA }}
+
 
