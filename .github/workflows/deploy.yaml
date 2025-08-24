@@ -10,14 +10,17 @@ on:
 env:
   PROJECT_ID: fraud-digest-app-v2-469310
   REGION: europe-west1
-  SERVICE_NAME: fraud-analysis-processor-v2
+  # --- Backend Config ---
+  BACKEND_SERVICE_NAME: fraud-analysis-processor-v2
+  BACKEND_IMAGE_NAME: fraud-digest-backend
+  # --- Trigger Config ---
   TOPIC_NAME: analysis-requests
   TRIGGER_NAME: fraud-analysis-processor-v2-trigger
   TRIGGER_SA: eventarc-trigger-sa@fraud-digest-app-v2-469310.iam.gserviceaccount.com
 
 jobs:
   deploy-backend:
-    name: Deploy Backend Function and Trigger
+    name: Build and Deploy Backend
     runs-on: ubuntu-latest
 
     permissions:
@@ -37,13 +40,19 @@ jobs:
       - name: Set up gcloud CLI
         uses: google-github-actions/setup-gcloud@v2
 
-      - name: Deploy Cloud Function using gcloud
+      - name: Build and Push Backend Docker Image
+        run: |-
+          gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev
+          docker build -t ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/fraud-digest-repo/${{ env.BACKEND_IMAGE_NAME }}:latest -f backend/Dockerfile .
+
+          docker push ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/fraud-digest-repo/${{ env.BACKEND_IMAGE_NAME }}:latest
+
+      - name: Deploy Backend Image to Cloud Run
         run: |
-          gcloud run deploy ${{ env.SERVICE_NAME }} \
+          gcloud run deploy ${{ env.BACKEND_SERVICE_NAME }} \
             --project=${{ env.PROJECT_ID }} \
             --region=${{ env.REGION }} \
-            --source=./backend \
-            --set-env-vars="FUNCTION_TARGET=main,FUNCTION_SIGNATURE_TYPE=cloudevent" \
+            --image=${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/fraud-digest-repo/${{ env.BACKEND_IMAGE_NAME }}:latest \
             --ingress=internal \
             --allow-unauthenticated \
             --memory=512Mi \
@@ -58,7 +67,7 @@ jobs:
           gcloud eventarc triggers create ${{ env.TRIGGER_NAME }} \
             --project=${{ env.PROJECT_ID }} \
             --location=${{ env.REGION }} \
-            --destination-run-service=${{ env.SERVICE_NAME }} \
+            --destination-run-service=${{ env.BACKEND_SERVICE_NAME }} \
             --destination-run-region=${{ env.REGION }} \
             --event-filters="type=google.cloud.pubsub.topic.v1.messagePublished" \
             --transport-topic=${{ env.TOPIC_NAME }} \
