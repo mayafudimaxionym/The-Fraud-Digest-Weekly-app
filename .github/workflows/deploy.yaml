@@ -35,7 +35,7 @@ jobs:
           service_account: 'github-actions-deployer@fraud-digest-app-v2-469310.iam.gserviceaccount.com'
 
       - name: Set up gcloud CLI
-        uses: google-github-actions/setup-gcloud@v2 # <-- FIXED: Pinned to stable version v2
+        uses: google-github-actions/setup-gcloud@v2
 
       - name: Deploy Cloud Function using gcloud
         run: |
@@ -43,7 +43,7 @@ jobs:
             --project=${{ env.PROJECT_ID }} \
             --region=${{ env.REGION }} \
             --source=./backend \
-            --service-account=github-actions-deployer@${{ env.PROJECT_ID }}.iam.gserviceaccount.com \
+            --set-env-vars="FUNCTION_TARGET=main,FUNCTION_SIGNATURE_TYPE=cloudevent" \
             --ingress=internal \
             --allow-unauthenticated \
             --memory=512Mi \
@@ -63,3 +63,4 @@ jobs:
             --event-filters="type=google.cloud.pubsub.topic.v1.messagePublished" \
             --transport-topic=${{ env.TOPIC_NAME }} \
             --service-account=${{ env.TRIGGER_SA }}
+            
