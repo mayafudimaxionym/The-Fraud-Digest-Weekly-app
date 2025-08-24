@@ -86,6 +86,7 @@ def send_email(to_email, subject, message_text):
         return None
 
 # ... (The functions download_and_load_spacy_model, get_article_text, extract_entities, parse_message_safely remain unchanged) ...
+
 def download_and_load_spacy_model():
     global nlp
     if nlp is None:
@@ -119,8 +120,8 @@ def extract_entities(text):
     return entities
 def parse_message_safely(message_str):
     logging.info(f"Attempting to parse message: {message_str}")
-    url_match = re.search(r"url:\s*['\"]?(.*?)['\"]?[\s,}]", message_str)
-    email_match = re.search(r"email:\s*['\"]?(.*?)['\"]?[\s,}]", message_str)
+    url_match = re.search(r'"url"\s*:\s*"(.*?)"', message_str)
+    email_match = re.search(r'"email"\s*:\s*"(.*?)"', message_str)
     url = url_match.group(1) if url_match else None
     email = email_match.group(1) if email_match else None
     if url and email:
@@ -131,6 +132,54 @@ def parse_message_safely(message_str):
         return None
 
 @functions_framework.cloud_event
+def main(cloud_event):
+    logging.info("Function execution started.")
+    try:
+        download_and_load_spacy_model()
+
+        message_data_encoded = cloud_event.data.get("message", {}).get("data")
+        if not message_data_encoded:
+            logging.error("No data in Pub/Sub message.")
+            return
+
+        message_data = base64.b64decode(message_data_encoded).decode("utf-8")
+        data = parse_message_safely(message_data)
+        if not data: return
+
+        url = data.get("url")
+        email = data.get("email")
+
+        logging.info(f"Processing request for user: {email}")
+        article_text = get_article_text(url)
+        if not article_text:
+            logging.warning(f"Could not retrieve text from {url}. Aborting.")
+            return
+        
+        entities = extract_entities(article_text)
+        
+        # --- DEBUGGING: Create and Log Email Body ---
+        subject = f"Fraud Digest Analysis for: {url}"
+        body = f"<h1>Analysis Results</h1><p>Found {len(entities)} entities in the article from {url}.</p>"
+        if entities:
+            body += "<table border='1' style='border-collapse: collapse; width: 100%;'><tr><th style='padding: 8px; text-align: left;'>Entity</th><th style='padding: 8px; text-align: left;'>Label</th></tr>"
+            for entity, label in entities:
+                body += f"<tr><td style='padding: 8px;'>{entity}</td><td style='padding: 8px;'>{label}</td></tr>"
+            body += "</table>"
+        else:
+            body += "<p>No entities were found.</p>"
+        
+        # Instead of sending an email, we log the subject and body
+        logging.info(f"--- SIMULATED EMAIL TO {email} ---")
+        logging.info(f"SUBJECT: {subject}")
+        logging.info(f"BODY: {body}")
+        logging.info("--- END OF SIMULATED EMAIL ---")
+
+    except Exception as e:
+        logging.error(f"An unexpected error occurred in main handler: {e}", exc_info=True)
+    
+    logging.info("Function execution finished.")
+
+
 def main(cloud_event):
     logging.info("Function execution started.")
     try:
