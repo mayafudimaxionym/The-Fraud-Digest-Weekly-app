@@ -12,7 +12,7 @@ COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # 4. Copy the rest of the backend source code
-COPY . .
+COPY backend/ .
 
 # 5. Set the entrypoint. functions-framework will automatically
 # listen on the PORT environment variable provided by Cloud Run.
