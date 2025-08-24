@@ -43,7 +43,7 @@ jobs:
       - name: Build and Push Backend Docker Image
         run: |-
           gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev
-          docker build -t ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/fraud-digest-repo/${{ env.BACKEND_IMAGE_NAME }}:latest -f backend/Dockerfile .
+          docker build -t ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/fraud-digest-repo/${{ env.BACKEND_IMAGE_NAME }}:latest -f backend/Dockerfile backend
 
           docker push ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/fraud-digest-repo/${{ env.BACKEND_IMAGE_NAME }}:latest
 
@@ -72,4 +72,3 @@ jobs:
             --event-filters="type=google.cloud.pubsub.topic.v1.messagePublished" \
             --transport-topic=${{ env.TOPIC_NAME }} \
             --service-account=${{ env.TRIGGER_SA }}
-            
