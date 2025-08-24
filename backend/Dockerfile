@@ -7,12 +7,12 @@ FROM python:3.10-slim
 WORKDIR /app
 
 # 3. Copy requirements and install dependencies
-COPY backend/requirements.txt .
+COPY requirements.txt .
 
 RUN pip install --no-cache-dir -r requirements.txt
 
 # 4. Copy the rest of the backend source code
-COPY backend/ .
+COPY . .
 
 # 5. Set the entrypoint. functions-framework will automatically
 # listen on the PORT environment variable provided by Cloud Run.
