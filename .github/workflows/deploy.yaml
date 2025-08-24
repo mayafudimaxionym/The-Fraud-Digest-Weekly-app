@@ -43,6 +43,7 @@ jobs:
             --project=${{ env.PROJECT_ID }} \
             --region=${{ env.REGION }} \
             --source=./backend \
+            --service-account=github-actions-deployer@${{ env.PROJECT_ID }}.iam.gserviceaccount.com \
             --ingress=internal \
             --allow-unauthenticated \
             --memory=512Mi \
@@ -62,4 +63,3 @@ jobs:
             --event-filters="type=google.cloud.pubsub.topic.v1.messagePublished" \
             --transport-topic=${{ env.TOPIC_NAME }} \
             --service-account=${{ env.TRIGGER_SA }}
-            
