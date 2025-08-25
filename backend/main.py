@@ -9,8 +9,9 @@ import re
 import requests
 from bs4 import BeautifulSoup
 import spacy
+import resend # pyright: ignore[reportMissingImports]
 
-import functions_framework
+import functions_framework # pyright: ignore[reportMissingImports]
 from google.cloud import secretmanager
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
@@ -64,7 +65,7 @@ def initialize_gmail_service():
         except Exception as e:
             logging.error(f"Failed to initialize Gmail service: {e}", exc_info=True)
             raise
-
+'''
 def send_email(to_email, subject, message_text):
     try:
         message = {'raw': base64.urlsafe_b64encode(f"To: {to_email}\r\nSubject: {subject}\r\nContent-Type: text/html; charset=utf-8\r\n\r\n{message_text}".encode('utf-8')).decode('ascii')}
@@ -74,7 +75,28 @@ def send_email(to_email, subject, message_text):
     except HttpError as error:
         logging.error(f"An error occurred while sending email: {error}")
         return None
-    
+'''
+def send_email(to_email, from_email, subject, html_content):
+    """Sends an email using the Resend API."""
+    logging.info(f"Attempting to send email to {to_email} via Resend")
+    try:
+        api_key = access_secret_version("RESEND_API_KEY")
+        resend.api_key = api_key
+
+        params = {
+            "from": f"Fraud Digest <{from_email}>",
+            "to": [to_email],
+            "subject": subject,
+            "html": html_content,
+        }
+        
+        email = resend.Emails.send(params)
+        logging.info(f"Email sent successfully to {to_email}. Email object: {email}")
+        return email
+    except Exception as e:
+        logging.error(f"An error occurred while sending email: {e}", exc_info=True)
+        return None
+        
 def download_and_load_spacy_model():
     global nlp
     if nlp is None:
@@ -141,7 +163,7 @@ def parse_message_safely(message_str):
 def main(cloud_event):
     logging.info("Function execution started.")
     try:
-        initialize_gmail_service()
+        # Initialize services on cold start
         download_and_load_spacy_model()
 
         message_data_encoded = cloud_event.data.get("message", {}).get("data")
@@ -151,7 +173,7 @@ def main(cloud_event):
 
         message_data = base64.b64decode(message_data_encoded).decode("utf-8")
         
-        # Use the new, safe parser
+        # Use the robust parser
         data = parse_message_safely(message_data)
         if not data: return
 
@@ -160,27 +182,31 @@ def main(cloud_event):
 
         logging.info(f"Processing request for user: {email}")
         article_text = get_article_text(url)
+        
+        # --- Create Email Body ---
         if not article_text:
-            failure_subject = f"Failed to analyze URL: {url}"
-            failure_body = f"<p>Sorry, we could not retrieve the article content from the provided URL.</p><p>URL: {url}</p>"
-            send_email(email, failure_subject, failure_body)
-            return
-        
-        entities = extract_entities(article_text)
-        
-        subject = f"Fraud Digest Analysis for: {url}"
-        body = f"<h1>Analysis Results</h1><p>Found {len(entities)} entities in the article from {url}.</p>"
-        if entities:
-            body += "<table border='1' style='border-collapse: collapse; width: 100%;'><tr><th style='padding: 8px; text-align: left;'>Entity</th><th style='padding: 8px; text-align: left;'>Label</th></tr>"
-            for entity, label in entities:
-                body += f"<tr><td style='padding: 8px;'>{entity}</td><td style='padding: 8px;'>{label}</td></tr>"
-            body += "</table>"
+            logging.warning(f"Could not retrieve text from {url}. Sending failure email.")
+            subject = f"Failed to analyze URL: {url}"
+            body = f"<h1>Analysis Failed</h1><p>Sorry, we could not retrieve the article content from the provided URL.</p><p>URL: {url}</p>"
         else:
-            body += "<p>No entities were found.</p>"
+            entities = extract_entities(article_text)
+            subject = f"Fraud Digest Analysis for: {url}"
+            body = f"<h1>Analysis Results</h1><p>Found {len(entities)} entities in the article from {url}.</p>"
+            if entities:
+                body += "<table border='1' style='border-collapse: collapse; width: 100%;'><tr><th style='padding: 8px; text-align: left;'>Entity</th><th style='padding: 8px; text-align: left;'>Label</th></tr>"
+                for entity, label in entities:
+                    body += f"<tr><td style='padding: 8px;'>{entity}</td><td style='padding: 8px;'>{label}</td></tr>"
+                body += "</table>"
+            else:
+                body += "<p>No entities were found.</p>"
         
-        send_email(email, subject, body)
+        # --- Send the email ---
+        # IMPORTANT: Replace with your verified sender email address in Resend
+        from_email = "digest@axionym.com" 
+        send_email(email, from_email, subject, body)
 
     except Exception as e:
         logging.error(f"An unexpected error occurred in main handler: {e}", exc_info=True)
     
     logging.info("Function execution finished.")
+    
