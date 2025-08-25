@@ -10,7 +10,7 @@ import requests
 from bs4 import BeautifulSoup
 import spacy
 
-import functions_framework
+import functions_framework # pyright: ignore[reportMissingImports]
 
 from google.cloud import secretmanager
 from google.oauth2.credentials import Credentials
