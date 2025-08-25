@@ -1,4 +1,4 @@
-# backend/main.py (FINAL VERSION)
+# backend/main.py
 
 import base64
 import json
@@ -7,90 +7,83 @@ import os
 import sys
 import re
 import requests
+
 from bs4 import BeautifulSoup
-import spacy
-import resend # pyright: ignore[reportMissingImports]
 
 import functions_framework # pyright: ignore[reportMissingImports]
 from google.cloud import secretmanager
-from google.oauth2.credentials import Credentials
-from googleapiclient.discovery import build
-from googleapiclient.errors import HttpError
+import resend # pyright: ignore[reportMissingImports]
+
+# Import Vertex AI libraries
+import vertexai # pyright: ignore[reportMissingImports]
+from vertexai.generative_models import GenerativeModel # pyright: ignore[reportMissingImports]
 
 # --- Project Configuration ---
 PROJECT_ID = None
+REGION = "europe-west1" # Specify the region for Vertex AI services
+
+# This block reliably gets the project ID whether running locally or in GCP.
 try:
+    # This works when running in a GCP environment (Cloud Run, Functions, etc.)
     response = requests.get("http://metadata.google.internal/computeMetadata/v1/project/project-id", headers={"Metadata-Flavor": "Google"}, timeout=2)
     if response.status_code == 200:
         PROJECT_ID = response.text
 except requests.exceptions.RequestException:
     logging.warning("Could not contact metadata server, falling back to env var.")
+    # This is the fallback for local development
     PROJECT_ID = os.environ.get("GCP_PROJECT")
 
 if not PROJECT_ID:
-    logging.error("GCP_PROJECT could not be determined.")
-    sys.exit(1)
+    logging.error("GCP_PROJECT could not be determined. Exiting.")
+    sys.exit(1) # Exit with an error code if no project ID is found
 
 # --- Logging Setup ---
-
+# Set log level from environment variable, default to INFO for production
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(stream=sys.stdout, level=LOG_LEVEL,
                     format='%(asctime)s - %(levelname)s - %(message)s')
 
 # --- Global variables ---
-nlp = None
-gmail_service = None
+# These are initialized once per container instance (on cold start) to save resources.
+gemini_model = None
 secrets = {}
 
+def initialize_vertex_ai():
+    """Initializes the Vertex AI client and model if they are not already loaded."""
+    global gemini_model
+    if gemini_model is None:
+        logging.info("Cold start: Initializing Vertex AI...")
+        try:
+            vertexai.init(project=PROJECT_ID, location=REGION)
+            # Using gemini-1.5-flash, which is fast and cost-effective for this task.
+            gemini_model = GenerativeModel("gemini-1.5-flash-001")
+            logging.info("Vertex AI initialized successfully.")
+        except Exception as e:
+            logging.error(f"Failed to initialize Vertex AI: {e}", exc_info=True)
+            raise # Re-raise to fail the function invocation if Vertex AI can't start
+
 def access_secret_version(secret_id, version_id="latest"):
-    if secret_id in secrets: return secrets[secret_id]
+    """
+    Accesses a secret version from Google Cloud Secret Manager.
+    Caches secrets in a global dict to avoid repeated API calls.
+    """
+    if secret_id in secrets:
+        return secrets[secret_id]
+    
+    logging.info(f"Accessing secret: {secret_id}")
     client = secretmanager.SecretManagerServiceClient()
     name = f"projects/{PROJECT_ID}/secrets/{secret_id}/versions/{version_id}"
     response = client.access_secret_version(request={"name": name})
-    payload = response.payload.data.decode("UTF-8")
+    payload = response.payload.data.decode("UTF-8").strip() # .strip() to remove whitespace
     secrets[secret_id] = payload
     return payload
 
-def initialize_gmail_service():
-    global gmail_service
-    if gmail_service is None:
-        logging.info("Initializing Gmail service...")
-        try:
-            client_id = access_secret_version("GMAIL_CLIENT_ID")
-            client_secret = access_secret_version("GMAIL_CLIENT_SECRET")
-            refresh_token = access_secret_version("GMAIL_REFRESH_TOKEN")
-            creds = Credentials.from_authorized_user_info(info={"client_id": client_id, "client_secret": client_secret, "refresh_token": refresh_token}, scopes=['https://www.googleapis.com/auth/gmail.send'])
-            gmail_service = build('gmail', 'v1', credentials=creds)
-            logging.info("Gmail service initialized successfully.")
-        except Exception as e:
-            logging.error(f"Failed to initialize Gmail service: {e}", exc_info=True)
-            raise
-'''
-def send_email(to_email, subject, message_text):
-    try:
-        message = {'raw': base64.urlsafe_b64encode(f"To: {to_email}\r\nSubject: {subject}\r\nContent-Type: text/html; charset=utf-8\r\n\r\n{message_text}".encode('utf-8')).decode('ascii')}
-        sent_message = gmail_service.users().messages().send(userId='me', body=message).execute()
-        logging.info(f"Email sent successfully to {to_email}. Message ID: {sent_message['id']}")
-        return sent_message
-    except HttpError as error:
-        logging.error(f"An error occurred while sending email: {error}")
-        return None
-'''
 def send_email(to_email, from_email, subject, html_content):
     """Sends an email using the Resend API."""
     logging.info(f"Attempting to send email to {to_email} via Resend")
     try:
         api_key = access_secret_version("RESEND_API_KEY")
-        
-        # --- DEBUGGING LINE ---
-        # Let's see the exact key we are using. repr() shows hidden characters.
-        #logging.info(f"API Key from Secret Manager: {repr(api_key)}")
-        # --- END OF DEBUGGING ---
-
-        # Clean the key just in case
-        cleaned_api_key = api_key.strip()
-        
-        resend.api_key = cleaned_api_key
+        resend.api_key = api_key
 
         params = {
             "from": f"Fraud Digest <{from_email}>",
@@ -100,24 +93,14 @@ def send_email(to_email, from_email, subject, html_content):
         }
         
         email = resend.Emails.send(params)
-        logging.info(f"Email sent successfully to {to_email}. Email object: {email}")
+        logging.info(f"Email sent successfully to {to_email}. Email ID: {email.get('id')}")
         return email
     except Exception as e:
         logging.error(f"An error occurred while sending email: {e}", exc_info=True)
         return None
-        
-def download_and_load_spacy_model():
-    global nlp
-    if nlp is None:
-        logging.info("Cold start: Loading spaCy model...")
-        try:
-            spacy.cli.download("en_core_web_sm")
-            nlp = spacy.load("en_core_web_sm")
-            logging.info("Model loaded successfully.")
-        except Exception as e:
-            logging.error(f"Failed to load spaCy model: {e}", exc_info=True)
-            raise
+
 def get_article_text(url):
+    """Fetches and extracts text content from a given URL."""
     logging.info(f"Fetching text from URL: {url}")
     try:
         response = requests.get(url, timeout=15)
@@ -130,50 +113,104 @@ def get_article_text(url):
     except requests.exceptions.RequestException as e:
         logging.error(f"Error fetching URL {url}: {e}")
         return None
-def extract_entities(text):
-    if not text: return []
-    logging.info("Extracting entities...")
-    doc = nlp(text)
-    entities = [(ent.text, ent.label_) for ent in doc.ents]
-    logging.info(f"Found {len(entities)} entities.")
-    return entities
+
+def extract_entities_with_gemini(text):
+    """
+    Extracts named entities using the Gemini model via a structured prompt.
+    """
+    if not text or not gemini_model:
+        return []
+    
+    logging.info("Extracting entities with Gemini...")
+
+    # Truncate the text to a reasonable length to manage token usage and costs.
+    # 15000 characters is a safe limit for most articles.
+    truncated_text = text[:15000]
+
+    # This is the prompt that instructs the LLM on what to do.
+    # It's a key part of "prompt engineering".
+    prompt = f"""
+    Analyze the following news article text and extract all named entities.
+    The entities should be categorized into one of the following labels:
+    - PERSON, NORP, FAC, ORG, GPE, LOC, PRODUCT, EVENT, WORK_OF_ART, LAW, LANGUAGE, DATE, TIME, PERCENT, MONEY, QUANTITY, ORDINAL, CARDINAL.
+
+    Your response MUST be a valid JSON array of objects, where each object has two keys: "entity" and "label".
+    Example format:
+    [
+      {{"entity": "Elon Musk", "label": "PERSON"}},
+      {{"entity": "Tesla", "label": "ORG"}}
+    ]
+
+    If no entities are found, return an empty JSON array: [].
+    Do not include any explanations or introductory text in your response. Only provide the JSON.
+
+    Article text:
+    ---
+    {truncated_text}
+    ---
+    """
+    
+    try:
+        response = gemini_model.generate_content(prompt)
+        
+        # LLM responses can sometimes include markdown formatting (```json ... ```).
+        # This code cleans it up to ensure we have a pure JSON string.
+        cleaned_response = response.text.strip().replace("```json", "").replace("```", "").strip()
+        
+        logging.info(f"Gemini raw response received, attempting to parse JSON.")
+        logging.debug(f"Cleaned Gemini response: {cleaned_response}")
+        
+        entities = json.loads(cleaned_response)
+        logging.info(f"Successfully parsed {len(entities)} entities from Gemini response.")
+        
+        # Convert the list of dictionaries to a list of tuples to match our desired format.
+        return [(item.get("entity"), item.get("label")) for item in entities]
+
+    except json.JSONDecodeError:
+        logging.error(f"Failed to decode JSON from Gemini response: {cleaned_response}")
+        return []
+    except Exception as e:
+        logging.error(f"An error occurred during Gemini API call: {e}", exc_info=True)
+        return []
 
 def parse_message_safely(message_str):
     """
-    A robust parser that handles malformed JSON-like strings.
-    It uses regular expressions to find the URL and email.
+    A robust parser that handles potentially malformed JSON-like strings from Pub/Sub.
     """
     logging.info(f"Attempting to parse message: {message_str}")
     
-    # Use regex to find url and email, tolerant to missing quotes around keys
-    url_match = re.search(r'url"\s*:\s*"(.*?)"', message_str)
-    email_match = re.search(r'email"\s*:\s*"(.*?)"', message_str)
+    # First, try to parse as valid JSON
+    try:
+        data = json.loads(message_str)
+        if "url" in data and "email" in data:
+            logging.info("Successfully parsed as valid JSON.")
+            return data
+    except json.JSONDecodeError:
+        logging.warning("Message is not valid JSON, attempting regex fallback.")
+
+    # Fallback for malformed strings (e.g., keys without quotes)
+    url_match = re.search(r'url"\s*:\s*"(.*?)"', message_str) or re.search(r"url:\s*([^,}\s]+)", message_str)
+    email_match = re.search(r'email"\s*:\s*"(.*?)"', message_str) or re.search(r"email:\s*([^,}\s]+)", message_str)
     
     url = url_match.group(1) if url_match else None
     email = email_match.group(1) if email_match else None
     
     if url and email:
-        logging.info(f"Successfully parsed with regex: url={url}, email={email}")
+        logging.info(f"Successfully parsed with fallback regex: url={url}, email={email}")
         return {"url": url, "email": email}
-    else:
-        # Fallback for the malformed string without quotes
-        url_match = re.search(r"url:\s*([^,}\s]+)", message_str)
-        email_match = re.search(r"email:\s*([^,}\s]+)", message_str)
-        url = url_match.group(1) if url_match else None
-        email = email_match.group(1) if email_match else None
-        if url and email:
-            logging.info(f"Successfully parsed with fallback regex: url={url}, email={email}")
-            return {"url": url, "email": email}
 
     logging.error(f"Failed to parse URL and/or email from message: {message_str}")
     return None
 
 @functions_framework.cloud_event
 def main(cloud_event):
+    """
+    This function is triggered by a message published to a Pub/Sub topic.
+    """
     logging.info("Function execution started.")
     try:
-        # Initialize services on cold start
-        download_and_load_spacy_model()
+        # Initialize external services. This will only run on a cold start.
+        initialize_vertex_ai()
 
         message_data_encoded = cloud_event.data.get("message", {}).get("data")
         if not message_data_encoded:
@@ -181,9 +218,8 @@ def main(cloud_event):
             return
 
         message_data = base64.b64decode(message_data_encoded).decode("utf-8")
-        
-        # Use the robust parser
         data = parse_message_safely(message_data)
+        
         if not data: return
 
         url = data.get("url")
@@ -192,14 +228,15 @@ def main(cloud_event):
         logging.info(f"Processing request for user: {email}")
         article_text = get_article_text(url)
         
-        # --- Create Email Body ---
+        
         if not article_text:
             logging.warning(f"Could not retrieve text from {url}. Sending failure email.")
             subject = f"Failed to analyze URL: {url}"
             body = f"<h1>Analysis Failed</h1><p>Sorry, we could not retrieve the article content from the provided URL.</p><p>URL: {url}</p>"
         else:
-            entities = extract_entities(article_text)
-            subject = f"Fraud Digest Analysis for: {url}"
+            # Use the new Gemini function instead of the old spaCy one
+            entities = extract_entities_with_gemini(article_text)
+            subject = f"Fraud Digest Analysis (Gemini) for: {url}"
             body = f"<h1>Analysis Results</h1><p>Found {len(entities)} entities in the article from {url}.</p>"
             if entities:
                 body += "<table border='1' style='border-collapse: collapse; width: 100%;'><tr><th style='padding: 8px; text-align: left;'>Entity</th><th style='padding: 8px; text-align: left;'>Label</th></tr>"
@@ -209,7 +246,6 @@ def main(cloud_event):
             else:
                 body += "<p>No entities were found.</p>"
         
-        # --- Send the email ---
         # IMPORTANT: Replace with your verified sender email address in Resend
         from_email = "digest@axionym.com" 
         send_email(email, from_email, subject, body)
