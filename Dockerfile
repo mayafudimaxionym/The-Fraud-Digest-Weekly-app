@@ -17,7 +17,7 @@ RUN pip install --upgrade pip
 
 # Stage 4: Download the spaCy model separately
 # This is a separate layer, so it's only re-run if the model version changes.
-RUN python -m spacy download en_core_web_sm
+# RUN python -m spacy download en_core_web_sm
 
  # Copy the application source code from the frontend folder
  COPY frontend/ .

@@ -84,7 +84,7 @@ def send_email(to_email, from_email, subject, html_content):
         
         # --- DEBUGGING LINE ---
         # Let's see the exact key we are using. repr() shows hidden characters.
-        logging.info(f"API Key from Secret Manager: {repr(api_key)}")
+        #logging.info(f"API Key from Secret Manager: {repr(api_key)}")
         # --- END OF DEBUGGING ---
 
         # Clean the key just in case
