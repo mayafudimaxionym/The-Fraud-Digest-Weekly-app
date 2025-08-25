@@ -18,6 +18,9 @@ import resend # pyright: ignore[reportMissingImports]
 import vertexai # pyright: ignore[reportMissingImports]
 from vertexai.generative_models import GenerativeModel # pyright: ignore[reportMissingImports]
 
+import google.generativeai as genai
+
+
 # --- Project Configuration ---
 PROJECT_ID = None
 REGION = "europe-west1" # Specify the region for Vertex AI services
@@ -49,15 +52,16 @@ gemini_model = None
 secrets = {}
 
 def initialize_vertex_ai():
-    """Initializes the Vertex AI client and model."""
+    """Initializes the Vertex AI client."""
     global gemini_model
     if gemini_model is None:
         logging.info("Cold start: Initializing Vertex AI...")
         try:
-            vertexai.init(project=PROJECT_ID, location=REGION)
-            # Use gemini-1.0-pro, which is a stable and widely available model
-            gemini_model = GenerativeModel("gemini-1.0-pro")
-            logging.info("Vertex AI initialized successfully with gemini-1.0-pro.")
+            # Initialize without a region to use the global endpoint
+            vertexai.init(project=PROJECT_ID)
+            # Use the stable gemini-1.0-pro model
+            gemini_model = GenerativeModel("gemini-live-2.5-flash")
+            logging.info("Vertex AI initialized successfully with gemini-live-2.5-flash on global endpoint.")
         except Exception as e:
             logging.error(f"Failed to initialize Vertex AI: {e}", exc_info=True)
             raise

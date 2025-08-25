@@ -1,5 +1,7 @@
 # check_models.py (Corrected)
 from google.cloud import aiplatform
+import google.generativeai as genai
+import os
 
 PROJECT_ID = "fraud-digest-app-v2-469310"
 REGION = "us-central1"
@@ -26,6 +28,25 @@ def list_gemini_models():
         
         if not gemini_models_found:
             print("No Gemini models found in this region.")
+
+        api_key = os.getenv("GOOGLE_API_KEY")
+        if not api_key:
+            raise ValueError("GOOGLE_API_KEY environment variable not set.")
+
+        # Configure with the simplest possible settings
+        genai.configure(api_key=api_key)
+
+        print("\n--- Models available for 'generateContent' ---")
+        found_models = False
+        for m in genai.list_models():
+            if 'generateContent' in m.supported_generation_methods:
+                print(f"- {m.name}")
+                found_models = True
+        
+        if not found_models:
+            print("No models supporting 'generateContent' found with default settings.")
+
+
 
     except Exception as e:
         print(f"An error occurred: {e}")
