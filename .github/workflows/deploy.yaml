@@ -37,6 +37,15 @@ jobs:
       - name: Set up gcloud CLI
         uses: google-github-actions/setup-gcloud@v2
 
+      - name: Check for Gemini Model Access
+        run: |
+          echo "Checking for access to gemini-1.0-pro in ${{ env.REGION }}..."
+          gcloud ai models describe projects/google/locations/${{ env.REGION }}/publishers/google/models/gemini-1.0-pro
+          gcloud ai models describe projects/google/locations/${{ env.REGION }}/publishers/google/models/gemini-2.5-pro
+          gcloud ai models describe projects/google/locations/${{ env.REGION }}/publishers/google/models/gemini-*
+      # --- END OF NEW STEP ---
+
+
       - name: Deploy Cloud Function using gcloud
         run: |
           gcloud run deploy ${{ env.SERVICE_NAME }} \
