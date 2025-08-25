@@ -49,18 +49,18 @@ gemini_model = None
 secrets = {}
 
 def initialize_vertex_ai():
-    """Initializes the Vertex AI client and model if they are not already loaded."""
+    """Initializes the Vertex AI client and model."""
     global gemini_model
     if gemini_model is None:
         logging.info("Cold start: Initializing Vertex AI...")
         try:
             vertexai.init(project=PROJECT_ID, location=REGION)
-            # Using gemini-1.5-flash, which is fast and cost-effective for this task.
-            gemini_model = GenerativeModel("gemini-1.5-flash-001")
-            logging.info("Vertex AI initialized successfully.")
+            # Use gemini-1.0-pro, which is a stable and widely available model
+            gemini_model = GenerativeModel("gemini-1.0-pro")
+            logging.info("Vertex AI initialized successfully with gemini-1.0-pro.")
         except Exception as e:
             logging.error(f"Failed to initialize Vertex AI: {e}", exc_info=True)
-            raise # Re-raise to fail the function invocation if Vertex AI can't start
+            raise
 
 def access_secret_version(secret_id, version_id="latest"):
     """
