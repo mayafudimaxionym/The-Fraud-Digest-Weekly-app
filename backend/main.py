@@ -81,7 +81,16 @@ def send_email(to_email, from_email, subject, html_content):
     logging.info(f"Attempting to send email to {to_email} via Resend")
     try:
         api_key = access_secret_version("RESEND_API_KEY")
-        resend.api_key = api_key
+        
+        # --- DEBUGGING LINE ---
+        # Let's see the exact key we are using. repr() shows hidden characters.
+        logging.info(f"API Key from Secret Manager: {repr(api_key)}")
+        # --- END OF DEBUGGING ---
+
+        # Clean the key just in case
+        cleaned_api_key = api_key.strip()
+        
+        resend.api_key = cleaned_api_key
 
         params = {
             "from": f"Fraud Digest <{from_email}>",
@@ -209,4 +218,3 @@ def main(cloud_event):
         logging.error(f"An unexpected error occurred in main handler: {e}", exc_info=True)
     
     logging.info("Function execution finished.")
-    
