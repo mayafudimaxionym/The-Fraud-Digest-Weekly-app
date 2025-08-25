@@ -18,7 +18,12 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
 # --- Project Configuration ---
-PROJECT_ID = os.environ.get("GCP_PROJECT")
+#PROJECT_ID = os.environ.get("GCP_PROJECT")
+response = requests.get("http://metadata.google.internal/computeMetadata/v1/project/project-id", headers={"Metadata-Flavor": "Google"})
+PROJECT_ID = response.text if response.status_code == 200 else PROJECT_ID = os.environ.get("GCP_PROJECT")
+if not PROJECT_ID:
+    logging.error("GCP_PROJECT environment variable is not set and could not fetch from metadata server.")
+    sys.exit(1)
 
 # --- Logging Setup ---
 # Set log level from environment variable, default to INFO
