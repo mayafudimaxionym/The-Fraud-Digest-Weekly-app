@@ -1,0 +1,67 @@
+[m[1mNAME[m
+    gcloud ai models describe - get detailed model information about the given
+        model id
+
+[m[1mSYNOPSIS[m
+    [1mgcloud ai models describe[m ([4mMODEL[m : [1m--region[m=[4mREGION[m) [[4mGCLOUD_WIDE_FLAG ...[m]
+
+[m[1mEXAMPLES[m
+    Describe a model [1m123[m of project [1mexample[m in region [1mus-central1[m, run:
+
+        $ gcloud ai models describe 123 --project=example \
+            --region=us-central1
+
+    Describe a model [1m123[m of version [1m2[m of project [1mexample[m in region [1mus-central1[m,
+    run:
+
+        $ gcloud ai models describe 123@2 --project=example \
+            --region=us-central1
+
+[m[1mPOSITIONAL ARGUMENTS[m
+     Model resource - Model to describe. The arguments in this group can be
+     used to specify the attributes of this resource. (NOTE) Some attributes
+     are not given arguments in this group but can be set in other ways.
+
+     To set the [1mproject[m attribute:
+      * provide the argument [1mmodel[m on the command line with a fully specified
+        name;
+      * provide the argument [1m--project[m on the command line;
+      * set the property [1mcore/project[m.
+
+     This must be specified.
+
+       [4mMODEL[m
+          ID of the model or fully qualified identifier for the model.
+
+          To set the [1mname[m attribute:
+          + provide the argument [1mmodel[m on the command line.
+
+          This positional argument must be specified if any of the other
+          arguments in this group are specified.
+
+       [1m--region[m=[4mREGION[m
+          Cloud region for the model.
+
+          To set the [1mregion[m attribute:
+          + provide the argument [1mmodel[m on the command line with a fully
+            specified name;
+          + provide the argument [1m--region[m on the command line;
+          + set the property [1mai/region[m;
+          + choose one from the prompted list of available regions.
+
+[m[1mGCLOUD WIDE FLAGS[m
+    These flags are available to all commands: --access-token-file, --account,
+    --billing-project, --configuration, --flags-file, --flatten, --format,
+    --help, --impersonate-service-account, --log-http, --project, --quiet,
+    --trace-token, --user-output-enabled, --verbosity.
+
+    Run [1m$ gcloud help[m for details.
+
+[m[1mNOTES[m
+    These variants are also available:
+
+        $ gcloud alpha ai models describe
+
+        $ gcloud beta ai models describe
+
+[m
