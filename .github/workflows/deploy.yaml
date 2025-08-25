@@ -46,6 +46,7 @@ jobs:
             --ingress=internal \
             --allow-unauthenticated \
             --memory=512Mi \
+            --set-env-vars="GCP_PROJECT=${{ env.PROJECT_ID }}" \
             --quiet
 
       - name: Create or Update Eventarc Trigger
@@ -62,4 +63,3 @@ jobs:
             --event-filters="type=google.cloud.pubsub.topic.v1.messagePublished" \
             --transport-topic=${{ env.TOPIC_NAME }} \
             --service-account=${{ env.TRIGGER_SA }}
-            
