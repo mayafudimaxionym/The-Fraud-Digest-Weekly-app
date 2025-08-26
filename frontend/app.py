@@ -25,19 +25,19 @@ topic_path = publisher.topic_path(PROJECT_ID, TOPIC_ID)
 def publish_analysis_request(url, email):
     """Publishes a message to the Pub/Sub topic."""
     try:
-        logging.info(f"Attempting to publish message for URL: {url}")
+        logging.info(f"WEB: Attempting to publish message for URL: {url}")
         data = {"url": url, "email": email}
         message_data = json.dumps(data).encode("utf-8")
         
         future = publisher.publish(topic_path, message_data)
         future.result()
         
-        logging.info(f"Successfully published message for URL: {url}")
+        logging.info(f"WEB: Successfully published message for URL: {url}")
         st.session_state.last_submitted_url = url
         return True
     except Exception as e:
         logging.error(f"Failed to publish message: {e}", exc_info=True)
-        st.error(f"Failed to submit request: {e}")
+        st.error(f"WEB: Failed to submit request: {e}")
         return False
 
 def main():
@@ -52,14 +52,14 @@ def main():
     url = st.text_input("Enter article URL:", key="url_input")
 
     if st.button("Analyze"):
-        logging.info("Analyze button clicked.")
+        logging.info("WEB: Analyze button clicked.")
         if url:
             if url != st.session_state.last_submitted_url:
-                with st.spinner("Submitting request..."):
+                with st.spinner("WEB: Submitting request..."):
                     publish_analysis_request(url, user_email)
             else:
-                logging.warning(f"Duplicate submission attempted for URL: {url}")
-                st.warning("This URL has already been submitted.")
+                logging.warning(f"WEB: Duplicate submission attempted for URL: {url}")
+                st.warning("WEB: This URL has already been submitted.")
         else:
             st.warning("Please enter a URL.")
 
@@ -68,4 +68,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    
