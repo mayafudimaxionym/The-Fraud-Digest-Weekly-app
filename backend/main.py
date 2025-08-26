@@ -1,5 +1,9 @@
 # backend/main.py
 
+# ...
+from google.cloud import pubsub_v1
+# ...
+
 import base64
 import json
 import logging
@@ -167,10 +171,17 @@ def main(cloud_event):
     """
     try:
         _handle_message(cloud_event)
+        subscription_name = cloud_event.subscription
+        ack_id = cloud_event.ack_id
+        publisher = pubsub_v1.PublisherClient()
+        publisher.acknowledge(subscription=subscription_name, ack_ids=[ack_id])
+        logging.info(f"Message {ack_id} acknowledged.")
     except Exception as e:
         logging.critical(f"A critical, unhandled error occurred: {e}", exc_info=True)
     
     logging.info("Function finished. Acknowledging message.")
+
+
 
 def _handle_message(cloud_event):
     """The core logic of the function."""
