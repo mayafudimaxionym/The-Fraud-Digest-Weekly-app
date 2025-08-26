@@ -1,5 +1,0 @@
-# domain-policy.yaml
-constraint: constraints/iam.allowedPolicyMemberDomains
-listPolicy:
-  allowedValues:
-  - C00ueh1pc

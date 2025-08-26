@@ -1,4 +1,0 @@
-# policy.yaml
-constraint: constraints/run.allowedIngress
-listPolicy:
-  allValues: ALLOW

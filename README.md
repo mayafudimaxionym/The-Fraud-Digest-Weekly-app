@@ -110,7 +110,35 @@ The-Fraud-Digest-Weekly-app/
     *   **Как найти:** Создается в панели управления Resend в разделе `API Keys`.
     *   **Пример:** `re_...`
 
-### 3.2. Настройка проекта Google Cloud
+### 3.2. Локальная разработка и работа с Git
+
+```powershell
+# Клонирование репозитория (выполняется один раз)
+git clone <URL_ВАШЕГО_РЕПОЗИТОРИЯ>
+
+# Активация виртуального окружения
+.\.venv\Scripts\Activate.ps1
+
+# Установка зависимостей для локальной разработки
+pip install -r frontend/requirements.txt
+pip install -r backend/requirements.txt
+
+# --- Цикл разработки ---
+# 1. Внесите изменения в код
+
+# 2. Добавьте измененные файлы для коммита
+git add . # Добавить все измененные файлы
+# или
+git add path/to/your/file.py # Добавить конкретный файл
+
+# 3. Зафиксируйте изменения с осмысленным сообщением
+git commit -m "feat(backend): Add new feature to the backend"
+
+# 4. Отправьте изменения на GitHub. Эта команда запускает CI/CD пайплайн.
+git push origin main
+```
+
+### 3.3. Настройка проекта Google Cloud
 ```powershell
 # Создание нового проекта
 gcloud projects create fraud-digest-app-v2-469310 --name="Fraud Digest App V2"
@@ -126,7 +154,7 @@ gcloud auth application-default set-quota-project fraud-digest-app-v2-469310
 gcloud services enable run.googleapis.com artifactregistry.googleapis.com compute.googleapis.com iap.googleapis.com iamcredentials.googleapis.com secretmanager.googleapis.com pubsub.googleapis.com cloudfunctions.googleapis.com cloudbuild.googleapis.com eventarc.googleapis.com aiplatform.googleapis.com
 ```
 
-### 3.3. Развертывание Frontend (Cloud Run + LB + IAP)
+### 3.4. Развертывание Frontend (Cloud Run + LB + IAP)
 ```powershell
 # 1. Создание репозитория для Docker-образов
 gcloud artifacts repositories create fraud-digest-repo --repository-format=docker --location=europe-west1
@@ -159,7 +187,7 @@ gcloud compute backend-services update fraud-digest-backend --iap=enabled --glob
 gcloud run services update fraud-digest-weekly-app --ingress=internal-and-cloud-load-balancing
 ```
 
-### 3.4. Настройка Backend (Pub/Sub и Секреты)
+### 3.5. Настройка Backend (Pub/Sub и Секреты)
 ```powershell
 # Создание Pub/Sub темы
 gcloud pubsub topics create analysis-requests
@@ -168,7 +196,7 @@ gcloud pubsub topics create analysis-requests
 echo "<YOUR_RESEND_API_KEY>" | gcloud secrets create RESEND_API_KEY --project=fraud-digest-app-v2-469310 --data-file=-
 ```
 
-### 3.5. Настройка CI/CD (GitHub Actions)
+### 3.6. Настройка CI/CD (GitHub Actions)
 ```powershell
 # Создание сервисного аккаунта для CI/CD
 gcloud iam service-accounts create github-actions-deployer --display-name="GitHub Actions Deployer"
@@ -200,7 +228,7 @@ gcloud iam service-accounts create eventarc-trigger-sa --display-name="Eventarc 
 gcloud run services add-iam-policy-binding fraud-analysis-processor-v2 --region=europe-west1 --member="serviceAccount:eventarc-trigger-sa@fraud-digest-app-v2-469310.iam.gserviceaccount.com" --role="roles/run.invoker"
 ```
 
-### 3.6. Команды для отладки и обслуживания
+### 3.7. Команды для отладки и обслуживания
 ```powershell
 # Очистка "зависших" сообщений в подписке Pub/Sub
 gcloud pubsub subscriptions seek (gcloud eventarc triggers describe fraud-analysis-processor-v2-trigger --project=fraud-digest-app-v2-469310 --location=europe-west1 --format="value(transport.pubsub.subscription)") --time=$(Get-Date -Format "yyyy-MM-ddTHH:mm:ssZ")
