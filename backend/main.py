@@ -162,15 +162,15 @@ def parse_message_safely(message_str):
 @functions_framework.cloud_event
 def main(cloud_event):
     """
-    Main entry point, wrapping the core logic to ensure Pub/Sub messages
+    Main entry point. Wraps the core logic to ensure Pub/Sub messages
     are always acknowledged.
     """
     try:
         _handle_message(cloud_event)
     except Exception as e:
-        logging.critical(f"A critical, unhandled error occurred in the main handler: {e}", exc_info=True)
+        logging.critical(f"A critical, unhandled error occurred: {e}", exc_info=True)
     
-    logging.info("Function execution finished, message acknowledged.")
+    logging.info("Function finished. Acknowledging message.")
 
 def _handle_message(cloud_event):
     """The core logic of the function."""
@@ -214,4 +214,3 @@ def _handle_message(cloud_event):
     
     from_email = "digest@axionym.com" 
     send_email(email, from_email, subject, body)
-    
