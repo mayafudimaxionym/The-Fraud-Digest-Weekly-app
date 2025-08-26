@@ -16,6 +16,9 @@ from google.cloud import secretmanager
 import vertexai
 from vertexai.generative_models import GenerativeModel
 
+import resend # <-- ADD THIS LINE
+
+
 # --- Project Configuration ---
 PROJECT_ID = None
 # We explicitly define the region where our function and Vertex AI model will run.
@@ -237,4 +240,3 @@ def main(cloud_event):
         logging.error(f"An unexpected error occurred in main handler: {e}", exc_info=True)
     
     logging.info("Function execution finished.")
-    
