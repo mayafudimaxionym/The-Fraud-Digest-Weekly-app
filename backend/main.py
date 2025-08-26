@@ -59,9 +59,9 @@ def initialize_vertex_ai():
         try:
             # Initialize the library for our specific project and region.
             vertexai.init(project=PROJECT_ID, location=REGION)
-            # Load the gemini-1.0-pro model, a stable and widely available choice.
-            gemini_model = GenerativeModel("gemini-1.0-pro")
-            logging.info("Vertex AI initialized successfully with gemini-1.0-pro.")
+            # Load the gemini-2.5-flash model, a stable and widely available choice.
+            gemini_model = GenerativeModel("gemini-2.5-flash")
+            logging.info("Vertex AI initialized successfully with gemini-2.5-flash.")
         except Exception as e:
             logging.error(f"Failed to initialize Vertex AI: {e}", exc_info=True)
             raise # Fail fast if the core AI component can't be loaded.
