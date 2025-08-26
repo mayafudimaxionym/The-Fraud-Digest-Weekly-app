@@ -7,69 +7,66 @@ import os
 import sys
 import re
 import requests
-
 from bs4 import BeautifulSoup
 
-import functions_framework # pyright: ignore[reportMissingImports]
+import functions_framework
 from google.cloud import secretmanager
-import resend # pyright: ignore[reportMissingImports]
 
-# Import Vertex AI libraries
-import vertexai # pyright: ignore[reportMissingImports]
-from vertexai.generative_models import GenerativeModel # pyright: ignore[reportMissingImports]
-
-import google.generativeai as genai
-
+# Import the correct, powerful library for Vertex AI
+import vertexai
+from vertexai.generative_models import GenerativeModel
 
 # --- Project Configuration ---
 PROJECT_ID = None
-REGION = "europe-west1" # Specify the region for Vertex AI services
+# We explicitly define the region where our function and Vertex AI model will run.
+REGION = "europe-west1" 
 
-# This block reliably gets the project ID whether running locally or in GCP.
 try:
-    # This works when running in a GCP environment (Cloud Run, Functions, etc.)
+    # This is the standard way to get the Project ID when running in a GCP environment.
+    # It queries the local metadata server.
     response = requests.get("http://metadata.google.internal/computeMetadata/v1/project/project-id", headers={"Metadata-Flavor": "Google"}, timeout=2)
     if response.status_code == 200:
         PROJECT_ID = response.text
 except requests.exceptions.RequestException:
+    # This is a fallback for local development, where the metadata server isn't available.
     logging.warning("Could not contact metadata server, falling back to env var.")
-    # This is the fallback for local development
     PROJECT_ID = os.environ.get("GCP_PROJECT")
 
+# If we can't determine the project ID, we can't proceed.
 if not PROJECT_ID:
     logging.error("GCP_PROJECT could not be determined. Exiting.")
-    sys.exit(1) # Exit with an error code if no project ID is found
+    sys.exit(1) 
 
 # --- Logging Setup ---
-# Set log level from environment variable, default to INFO for production
-LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
-logging.basicConfig(stream=sys.stdout, level=LOG_LEVEL,
+# Configure logging to output to standard out, which is captured by Cloud Logging.
+logging.basicConfig(stream=sys.stdout, level=logging.INFO,
                     format='%(asctime)s - %(levelname)s - %(message)s')
 
 # --- Global variables ---
-# These are initialized once per container instance (on cold start) to save resources.
+# These are initialized once per container instance (on a "cold start") to improve performance
+# and reduce costs on subsequent invocations.
 gemini_model = None
 secrets = {}
 
 def initialize_vertex_ai():
-    """Initializes the Vertex AI client."""
+    """Initializes the Vertex AI client and model if they are not already loaded."""
     global gemini_model
     if gemini_model is None:
         logging.info("Cold start: Initializing Vertex AI...")
         try:
-            # Initialize without a region to use the global endpoint
-            vertexai.init(project=PROJECT_ID)
-            # Use the stable gemini-1.0-pro model
-            gemini_model = GenerativeModel("gemini-live-2.5-flash")
-            logging.info("Vertex AI initialized successfully with gemini-live-2.5-flash on global endpoint.")
+            # Initialize the library for our specific project and region.
+            vertexai.init(project=PROJECT_ID, location=REGION)
+            # Load the gemini-1.0-pro model, a stable and widely available choice.
+            gemini_model = GenerativeModel("gemini-1.0-pro")
+            logging.info("Vertex AI initialized successfully with gemini-1.0-pro.")
         except Exception as e:
             logging.error(f"Failed to initialize Vertex AI: {e}", exc_info=True)
-            raise
+            raise # Fail fast if the core AI component can't be loaded.
 
 def access_secret_version(secret_id, version_id="latest"):
     """
-    Accesses a secret version from Google Cloud Secret Manager.
-    Caches secrets in a global dict to avoid repeated API calls.
+    Accesses a secret from Secret Manager. Caches the result in a global dictionary
+    to prevent redundant API calls within the same function instance.
     """
     if secret_id in secrets:
         return secrets[secret_id]
@@ -78,7 +75,8 @@ def access_secret_version(secret_id, version_id="latest"):
     client = secretmanager.SecretManagerServiceClient()
     name = f"projects/{PROJECT_ID}/secrets/{secret_id}/versions/{version_id}"
     response = client.access_secret_version(request={"name": name})
-    payload = response.payload.data.decode("UTF-8").strip() # .strip() to remove whitespace
+    # .strip() is important to remove any potential trailing whitespace/newlines.
+    payload = response.payload.data.decode("UTF-8").strip()
     secrets[secret_id] = payload
     return payload
 
@@ -104,7 +102,7 @@ def send_email(to_email, from_email, subject, html_content):
         return None
 
 def get_article_text(url):
-    """Fetches and extracts text content from a given URL."""
+    """Fetches and extracts all paragraph text from a given URL."""
     logging.info(f"Fetching text from URL: {url}")
     try:
         response = requests.get(url, timeout=15)
@@ -120,33 +118,27 @@ def get_article_text(url):
 
 def extract_entities_with_gemini(text):
     """
-    Extracts named entities using the Gemini model via a structured prompt.
+    Sends the article text to the Gemini model with a specific prompt
+    to perform Named Entity Recognition (NER).
     """
     if not text or not gemini_model:
         return []
     
     logging.info("Extracting entities with Gemini...")
 
-    # Truncate the text to a reasonable length to manage token usage and costs.
-    # 15000 characters is a safe limit for most articles.
+    # Truncate text to avoid exceeding model token limits.
     truncated_text = text[:15000]
 
-    # This is the prompt that instructs the LLM on what to do.
-    # It's a key part of "prompt engineering".
+    # A detailed "prompt" that instructs the LLM on its task, input, and desired output format.
     prompt = f"""
     Analyze the following news article text and extract all named entities.
-    The entities should be categorized into one of the following labels:
-    - PERSON, NORP, FAC, ORG, GPE, LOC, PRODUCT, EVENT, WORK_OF_ART, LAW, LANGUAGE, DATE, TIME, PERCENT, MONEY, QUANTITY, ORDINAL, CARDINAL.
+    Categorize entities using standard labels like PERSON, ORG, GPE (Geo-Political Entity), etc.
 
     Your response MUST be a valid JSON array of objects, where each object has two keys: "entity" and "label".
-    Example format:
-    [
-      {{"entity": "Elon Musk", "label": "PERSON"}},
-      {{"entity": "Tesla", "label": "ORG"}}
-    ]
+    Example: [ {{"entity": "Elon Musk", "label": "PERSON"}}, {{"entity": "Tesla", "label": "ORG"}} ]
 
     If no entities are found, return an empty JSON array: [].
-    Do not include any explanations or introductory text in your response. Only provide the JSON.
+    Do not include any explanations or markdown formatting in your response.
 
     Article text:
     ---
@@ -157,17 +149,15 @@ def extract_entities_with_gemini(text):
     try:
         response = gemini_model.generate_content(prompt)
         
-        # LLM responses can sometimes include markdown formatting (```json ... ```).
-        # This code cleans it up to ensure we have a pure JSON string.
+        # Clean up the model's response to ensure it's pure JSON.
         cleaned_response = response.text.strip().replace("```json", "").replace("```", "").strip()
         
         logging.info(f"Gemini raw response received, attempting to parse JSON.")
-        logging.debug(f"Cleaned Gemini response: {cleaned_response}")
         
         entities = json.loads(cleaned_response)
         logging.info(f"Successfully parsed {len(entities)} entities from Gemini response.")
         
-        # Convert the list of dictionaries to a list of tuples to match our desired format.
+        # Convert from list of dicts to list of tuples for consistency.
         return [(item.get("entity"), item.get("label")) for item in entities]
 
     except json.JSONDecodeError:
@@ -179,28 +169,19 @@ def extract_entities_with_gemini(text):
 
 def parse_message_safely(message_str):
     """
-    A robust parser that handles potentially malformed JSON-like strings from Pub/Sub.
+    A robust parser that handles the malformed JSON-like string from Pub/Sub.
     """
     logging.info(f"Attempting to parse message: {message_str}")
     
-    # First, try to parse as valid JSON
-    try:
-        data = json.loads(message_str)
-        if "url" in data and "email" in data:
-            logging.info("Successfully parsed as valid JSON.")
-            return data
-    except json.JSONDecodeError:
-        logging.warning("Message is not valid JSON, attempting regex fallback.")
-
-    # Fallback for malformed strings (e.g., keys without quotes)
-    url_match = re.search(r'url"\s*:\s*"(.*?)"', message_str) or re.search(r"url:\s*([^,}\s]+)", message_str)
-    email_match = re.search(r'email"\s*:\s*"(.*?)"', message_str) or re.search(r"email:\s*([^,}\s]+)", message_str)
+    # Regex to find url and email, tolerant to missing quotes around keys
+    url_match = re.search(r'"url"\s*:\s*"(.*?)"', message_str) or re.search(r"url:\s*([^,}\s]+)", message_str)
+    email_match = re.search(r'"email"\s*:\s*"(.*?)"', message_str) or re.search(r"email:\s*([^,}\s]+)", message_str)
     
     url = url_match.group(1) if url_match else None
     email = email_match.group(1) if email_match else None
     
     if url and email:
-        logging.info(f"Successfully parsed with fallback regex: url={url}, email={email}")
+        logging.info(f"Successfully parsed with regex: url={url}, email={email}")
         return {"url": url, "email": email}
 
     logging.error(f"Failed to parse URL and/or email from message: {message_str}")
@@ -209,11 +190,11 @@ def parse_message_safely(message_str):
 @functions_framework.cloud_event
 def main(cloud_event):
     """
-    This function is triggered by a message published to a Pub/Sub topic.
+    The main entry point for the Cloud Function, triggered by a Pub/Sub message.
     """
     logging.info("Function execution started.")
     try:
-        # Initialize external services. This will only run on a cold start.
+        # Initialize external services on the first invocation of this instance.
         initialize_vertex_ai()
 
         message_data_encoded = cloud_event.data.get("message", {}).get("data")
@@ -223,7 +204,6 @@ def main(cloud_event):
 
         message_data = base64.b64decode(message_data_encoded).decode("utf-8")
         data = parse_message_safely(message_data)
-        
         if not data: return
 
         url = data.get("url")
@@ -232,13 +212,12 @@ def main(cloud_event):
         logging.info(f"Processing request for user: {email}")
         article_text = get_article_text(url)
         
-        
         if not article_text:
             logging.warning(f"Could not retrieve text from {url}. Sending failure email.")
             subject = f"Failed to analyze URL: {url}"
             body = f"<h1>Analysis Failed</h1><p>Sorry, we could not retrieve the article content from the provided URL.</p><p>URL: {url}</p>"
         else:
-            # Use the new Gemini function instead of the old spaCy one
+            # Use the new Gemini function for analysis.
             entities = extract_entities_with_gemini(article_text)
             subject = f"Fraud Digest Analysis (Gemini) for: {url}"
             body = f"<h1>Analysis Results</h1><p>Found {len(entities)} entities in the article from {url}.</p>"
@@ -250,7 +229,7 @@ def main(cloud_event):
             else:
                 body += "<p>No entities were found.</p>"
         
-        # IMPORTANT: Replace with your verified sender email address in Resend
+        # IMPORTANT: Replace with your verified sender email address in Resend.
         from_email = "digest@axionym.com" 
         send_email(email, from_email, subject, body)
 
@@ -258,3 +237,4 @@ def main(cloud_event):
         logging.error(f"An unexpected error occurred in main handler: {e}", exc_info=True)
     
     logging.info("Function execution finished.")
+    
