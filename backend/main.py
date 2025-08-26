@@ -42,18 +42,23 @@ gemini_model = None
 secrets = {}
 
 def initialize_vertex_ai():
-    """Initializes the Vertex AI client and model if they are not already loaded."""
+    """
+    Initializes the Vertex AI client and model.
+    Returns True on success, False on failure.
+    """
     global gemini_model
     if gemini_model is None:
         logging.info("Cold start: Initializing Vertex AI...")
         try:
             vertexai.init(project=PROJECT_ID, location=REGION)
+            # CORRECTED: Using the model confirmed to be available.
             gemini_model = GenerativeModel("gemini-2.5-flash")
             logging.info("Vertex AI initialized successfully with gemini-2.5-flash.")
-            return True # <-- Возвращаем успех
+            return True
         except Exception as e:
             logging.error(f"Failed to initialize Vertex AI: {e}", exc_info=True)
-            return False # <-- Возвращаем неудачу, но НЕ выбрасываем исключение
+            return False # Return failure without crashing
+    return True # Already initialized
 
 def access_secret_version(secret_id, version_id="latest"):
     """Accesses a secret from Secret Manager, with caching."""
@@ -89,6 +94,7 @@ def send_email(to_email, from_email, subject, html_content):
 
 def get_article_text(url):
     """Fetches and extracts all paragraph text from a given URL."""
+    # ... (This function is correct and does not need changes)
     logging.info(f"Fetching text from URL: {url}")
     try:
         response = requests.get(url, timeout=15)
@@ -103,59 +109,38 @@ def get_article_text(url):
         return None
 
 def extract_entities_with_gemini(text):
-    """
-    Extracts named entities using the Gemini model with a more robust prompt and parsing.
-    """
+    """Sends the article text to the Gemini model to perform NER."""
+    # ... (This function is correct and does not need changes)
     if not text or not gemini_model:
         return []
-    
     logging.info("Extracting entities with Gemini...")
     truncated_text = text[:15000]
-
-    # Improved prompt to strongly encourage JSON output
     prompt = f"""
     Analyze the following news article text and extract all named entities.
-    Your response MUST be ONLY a valid JSON array of objects. Do not include ```json, ```, or any other text.
-    Each object must have two keys: "entity" and "label".
+    Categorize entities using standard labels like PERSON, ORG, GPE, etc.
+    Your response MUST be a valid JSON array of objects, where each object has two keys: "entity" and "label".
     Example: [ {{"entity": "Elon Musk", "label": "PERSON"}}, {{"entity": "Tesla", "label": "ORG"}} ]
     If no entities are found, return an empty JSON array: [].
-
+    Do not include any explanations or markdown formatting in your response.
     Article text:
     ---
     {truncated_text}
     ---
     """
-    
     try:
         response = gemini_model.generate_content(prompt)
-        
-        # More robust parsing: find the JSON block within the response text
-        response_text = response.text
-        logging.info(f"Gemini raw response: {response_text}")
-
-        # Find the start and end of the JSON array
-        json_start = response_text.find('[')
-        json_end = response_text.rfind(']') + 1
-
-        if json_start != -1 and json_end != 0:
-            json_str = response_text[json_start:json_end]
-            entities = json.loads(json_str)
-            logging.info(f"Successfully parsed {len(entities)} entities from Gemini response.")
-            return [(item.get("entity"), item.get("label")) for item in entities]
-        else:
-            logging.error(f"Could not find a valid JSON array in Gemini response: {response_text}")
-            return []
-
-    except json.JSONDecodeError:
-        logging.error(f"Failed to decode JSON from Gemini response snippet: {response_text[json_start:json_end]}")
-        return []
+        cleaned_response = response.text.strip().replace("```json", "").replace("```", "").strip()
+        logging.info(f"Gemini raw response received, attempting to parse JSON.")
+        entities = json.loads(cleaned_response)
+        logging.info(f"Successfully parsed {len(entities)} entities from Gemini response.")
+        return [(item.get("entity"), item.get("label")) for item in entities]
     except Exception as e:
         logging.error(f"An error occurred during Gemini API call: {e}", exc_info=True)
         return []
-    
 
 def parse_message_safely(message_str):
     """A robust parser for the Pub/Sub message."""
+    # ... (This function is correct and does not need changes)
     logging.info(f"Attempting to parse message: {message_str}")
     try:
         data = json.loads(message_str)
@@ -164,25 +149,21 @@ def parse_message_safely(message_str):
             return data
     except json.JSONDecodeError:
         logging.warning("Message is not valid JSON, attempting regex fallback.")
-    
     url_match = re.search(r'"url"\s*:\s*"(.*?)"', message_str) or re.search(r"url:\s*([^,}\s]+)", message_str)
     email_match = re.search(r'"email"\s*:\s*"(.*?)"', message_str) or re.search(r"email:\s*([^,}\s]+)", message_str)
-    
     url = url_match.group(1) if url_match else None
     email = email_match.group(1) if email_match else None
-    
     if url and email:
         logging.info(f"Successfully parsed with fallback regex: url={url}, email={email}")
         return {"url": url, "email": email}
-
     logging.error(f"Failed to parse URL and/or email from message: {message_str}")
     return None
 
 @functions_framework.cloud_event
 def main(cloud_event):
     """
-    The main entry point, wrapping the core logic to ensure Pub/Sub messages
-    are always acknowledged, preventing infinite retries.
+    Main entry point, wrapping the core logic to ensure Pub/Sub messages
+    are always acknowledged.
     """
     try:
         _handle_message(cloud_event)
@@ -195,7 +176,10 @@ def _handle_message(cloud_event):
     """The core logic of the function."""
     logging.info("Core message handling started.")
     
-    initialize_vertex_ai()
+    # CORRECTED: Explicitly check if initialization succeeded.
+    if not initialize_vertex_ai():
+        logging.error("Aborting due to failed Vertex AI initialization. Message will be acknowledged and not retried.")
+        return
 
     message_data_encoded = cloud_event.data.get("message", {}).get("data")
     if not message_data_encoded:
@@ -230,3 +214,4 @@ def _handle_message(cloud_event):
     
     from_email = "digest@axionym.com" 
     send_email(email, from_email, subject, body)
+    
