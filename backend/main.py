@@ -103,34 +103,56 @@ def get_article_text(url):
         return None
 
 def extract_entities_with_gemini(text):
-    """Sends the article text to the Gemini model to perform NER."""
+    """
+    Extracts named entities using the Gemini model with a more robust prompt and parsing.
+    """
     if not text or not gemini_model:
         return []
     
     logging.info("Extracting entities with Gemini...")
     truncated_text = text[:15000]
+
+    # Improved prompt to strongly encourage JSON output
     prompt = f"""
     Analyze the following news article text and extract all named entities.
-    Categorize entities using standard labels like PERSON, ORG, GPE, etc.
-    Your response MUST be a valid JSON array of objects, where each object has two keys: "entity" and "label".
+    Your response MUST be ONLY a valid JSON array of objects. Do not include ```json, ```, or any other text.
+    Each object must have two keys: "entity" and "label".
     Example: [ {{"entity": "Elon Musk", "label": "PERSON"}}, {{"entity": "Tesla", "label": "ORG"}} ]
     If no entities are found, return an empty JSON array: [].
-    Do not include any explanations or markdown formatting in your response.
+
     Article text:
     ---
     {truncated_text}
     ---
     """
+    
     try:
         response = gemini_model.generate_content(prompt)
-        cleaned_response = response.text.strip().replace("```json", "").replace("```", "").strip()
-        logging.info(f"Gemini raw response received, attempting to parse JSON.")
-        entities = json.loads(cleaned_response)
-        logging.info(f"Successfully parsed {len(entities)} entities from Gemini response.")
-        return [(item.get("entity"), item.get("label")) for item in entities]
+        
+        # More robust parsing: find the JSON block within the response text
+        response_text = response.text
+        logging.info(f"Gemini raw response: {response_text}")
+
+        # Find the start and end of the JSON array
+        json_start = response_text.find('[')
+        json_end = response_text.rfind(']') + 1
+
+        if json_start != -1 and json_end != 0:
+            json_str = response_text[json_start:json_end]
+            entities = json.loads(json_str)
+            logging.info(f"Successfully parsed {len(entities)} entities from Gemini response.")
+            return [(item.get("entity"), item.get("label")) for item in entities]
+        else:
+            logging.error(f"Could not find a valid JSON array in Gemini response: {response_text}")
+            return []
+
+    except json.JSONDecodeError:
+        logging.error(f"Failed to decode JSON from Gemini response snippet: {response_text[json_start:json_end]}")
+        return []
     except Exception as e:
         logging.error(f"An error occurred during Gemini API call: {e}", exc_info=True)
         return []
+    
 
 def parse_message_safely(message_str):
     """A robust parser for the Pub/Sub message."""
