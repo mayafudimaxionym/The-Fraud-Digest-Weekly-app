@@ -48,12 +48,12 @@ def initialize_vertex_ai():
         logging.info("Cold start: Initializing Vertex AI...")
         try:
             vertexai.init(project=PROJECT_ID, location=REGION)
-            # Use the specified gemini-2.5-flash model
             gemini_model = GenerativeModel("gemini-2.5-flash")
             logging.info("Vertex AI initialized successfully with gemini-2.5-flash.")
+            return True # <-- Возвращаем успех
         except Exception as e:
             logging.error(f"Failed to initialize Vertex AI: {e}", exc_info=True)
-            raise
+            return False # <-- Возвращаем неудачу, но НЕ выбрасываем исключение
 
 def access_secret_version(secret_id, version_id="latest"):
     """Accesses a secret from Secret Manager, with caching."""
