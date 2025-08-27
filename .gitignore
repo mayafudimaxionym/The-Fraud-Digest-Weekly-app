@@ -22,4 +22,4 @@ gcp-credentials.json
 gmail-api-credentials.json
 refresh.token
 
-terraform/
+# terraform/
