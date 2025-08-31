@@ -3,17 +3,13 @@
 name: Build and Deploy Frontend to Cloud Run
 
 on:
-  # Trigger the workflow on pushes to the main branch,
-  # but only if files in the 'frontend/' directory or this workflow file itself were changed.
   push:
     branches: [ "main" ]
     paths:
       - 'frontend/**'
       - '.github/workflows/deploy-frontend.yml'
-      - 'Dockerfile' # Or the specific Dockerfile for the frontend
+      - 'Dockerfile'
       - 'terraform/**'
-      
-  # Allows to run this workflow manually from the Actions tab
   workflow_dispatch:
 
 env:
@@ -27,7 +23,6 @@ jobs:
   build-and-deploy:
     name: Build and Deploy Frontend
     runs-on: ubuntu-latest
-    
     permissions:
       contents: 'read'
       id-token: 'write'
@@ -49,14 +44,18 @@ jobs:
       - name: Terraform Init
         run: terraform -chdir=./terraform init
 
-      - name: Terraform Apply
+      - name: Terraform Plan
+        id: plan
         run: |
-          terraform -chdir=./terraform apply -auto-approve \
+          terraform -chdir=./terraform plan -out=tfplan \
             -var="gcp_project_id=${{ env.GCP_PROJECT_ID }}" \
             -var="gcp_region=${{ env.GCP_REGION }}" \
             -var="frontend_service_name=${{ env.SERVICE_NAME }}" \
             -var="repository_id=${{ env.REPOSITORY_ID }}" \
             -var="pubsub_topic_id=${{ env.PUBSUB_TOPIC_ID }}"
+
+      - name: Terraform Apply
+        run: terraform -chdir=./terraform apply -auto-approve "tfplan"
 
       - name: Set up gcloud CLI
         uses: google-github-actions/setup-gcloud@v2
@@ -78,4 +77,4 @@ jobs:
         run: |-
           SERVICE_URL=$(gcloud run service describe ${{ env.SERVICE_NAME }} --region=${{ env.GCP_REGION }} --format='value(status.url)')
           echo "Frontend is deployed at $SERVICE_URL"
-          echo "SERVICE_URL=$SERVICE_URL" >> $GITHUB_ENV
+          

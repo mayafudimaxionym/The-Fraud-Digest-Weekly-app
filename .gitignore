@@ -23,3 +23,13 @@ gmail-api-credentials.json
 refresh.token
 
 # terraform/
+# Terraform local files and state
+**/terraform.tfstate
+**/terraform.tfstate.backup
+**/.terraform/
+**/.terraform.lock.hcl
+**/*.tfvars
+**/override.tf
+**/override.tf.json
+**/*_override.tf
+**/*_override.tf.json

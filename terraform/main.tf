@@ -14,61 +14,62 @@ provider "google" {
   region  = var.gcp_region
 }
 
-// Enable all necessary APIs for the project in one go
 resource "google_project_service" "apis" {
-  for_each = toset([
-    "run.googleapis.com",
-    "artifactregistry.googleapis.com",
-    "cloudbuild.googleapis.com",
-    "iam.googleapis.com",
-    "pubsub.googleapis.com"
-  ])
-  service                    = each.key
-  disable_dependency_violation = true
+  for_each           = toset(var.gcp_service_list)
+  project            = var.gcp_project_id
+  service            = each.key
+  disable_on_destroy = false
+}
+resource "google_project_service" "iap_api" {
+  project            = var.gcp_project_id
+  service            = "iap.googleapis.com"
+  disable_on_destroy = false
 }
 
-// 1. Create a Pub/Sub topic for the frontend to send jobs to
+// === IAP (Identity-Aware Proxy) Configuration ===
+// We create the OAuth client and point it directly to the existing brand's name.
+resource "google_iap_client" "project_client" {
+  display_name = "Fraud Digest IAP Client"
+  // The brand ID must be the project NUMBER, not the project ID.
+  brand        = "projects/963241002796/brands/963241002796"
+}
+
+// === Application Infrastructure ===
 resource "google_pubsub_topic" "jobs_topic" {
   name       = var.pubsub_topic_id
+  project    = var.gcp_project_id
   depends_on = [google_project_service.apis]
 }
-
-// 2. Create a repository in Artifact Registry to store our Docker images
 resource "google_artifact_registry_repository" "repo" {
+  project       = var.gcp_project_id
   location      = var.gcp_region
   repository_id = var.repository_id
   description   = "Docker repository for fraud-digest application"
   format        = "DOCKER"
   depends_on    = [google_project_service.apis]
 }
-
-// 3. Create a dedicated Service Account for the frontend service for security
 resource "google_service_account" "frontend_sa" {
+  project      = var.gcp_project_id
   account_id   = "${var.frontend_service_name}-sa"
   display_name = "Service Account for Fraud Digest Frontend"
 }
-
-// 4. Grant the frontend's Service Account the permission to publish messages to our topic
 resource "google_pubsub_topic_iam_member" "publisher" {
-  topic  = google_pubsub_topic.jobs_topic.name
-  role   = "roles/pubsub.publisher"
-  member = "serviceAccount:${google_service_account.frontend_sa.email}"
+  project = var.gcp_project_id
+  topic   = google_pubsub_topic.jobs_topic.name
+  role    = "roles/pubsub.publisher"
+  member  = "serviceAccount:${google_service_account.frontend_sa.email}"
 }
-
-// 5. Create the Cloud Run service to run our frontend container
 resource "google_cloud_run_v2_service" "frontend_service" {
-  name     = var.frontend_service_name
-  location = var.gcp_region
-
+  project             = var.gcp_project_id
+  name                = var.frontend_service_name
+  location            = var.gcp_region
+  deletion_protection = false
+  ingress             = "INGRESS_TRAFFIC_ALL"
+  client              = google_iap_client.project_client.client_id
   template {
-    // Run the service using our dedicated service account
     service_account = google_service_account.frontend_sa.email
-    
     containers {
-      // The image will be specified during the deployment step in the CI/CD pipeline
-      image = "${var.gcp_region}-docker.pkg.dev/${var.gcp_project_id}/${google_artifact_registry_repository.repo.repository_id}/${var.frontend_service_name}:latest"
-      
-      // Pass the Pub/Sub topic ID and Project ID to the application as environment variables
+      image = "us-docker.pkg.dev/cloudrun/container/hello"
       env {
         name  = "GCP_PROJECT_ID"
         value = var.gcp_project_id
@@ -79,27 +80,18 @@ resource "google_cloud_run_v2_service" "frontend_service" {
       }
     }
   }
-
-  // Allow unauthenticated (public) access to the frontend service
-  iam_policy {
-    policy_data = data.google_iam_policy.noauth.policy_data
-  }
-
-  depends_on = [
-    google_project_service.apis,
-    google_pubsub_topic_iam_member.publisher
-  ]
+  depends_on = [google_project_service.apis, google_pubsub_topic_iam_member.publisher]
 }
 
-// Policy data to make the Cloud Run service publicly accessible
-data "google_iam_policy" "noauth" {
-  binding {
-    role    = "roles/run.invoker"
-    members = ["allUsers"]
-  }
+// Grant YOUR user the right to invoke the service (required for IAP).
+resource "google_cloud_run_v2_service_iam_member" "iap_invoker" {
+  project  = google_cloud_run_v2_service.frontend_service.project
+  location = google_cloud_run_v2_service.frontend_service.location
+  name     = google_cloud_run_v2_service.frontend_service.name
+  role     = "roles/run.invoker"
+  member   = "user:${var.gcp_support_email}"
 }
 
-// Output the URL of the deployed frontend service
 output "frontend_service_url" {
   value = google_cloud_run_v2_service.frontend_service.uri
 }
