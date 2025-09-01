@@ -10,69 +10,70 @@ terraform {
 }
 
 provider "google" {
-  project = var.gcp_project_id
-  region  = var.gcp_region
+  project = var.gcloud_project_id
+  region  = var.gcloud_region
 }
 
 resource "google_project_service" "apis" {
-  for_each           = toset(var.gcp_service_list)
-  project            = var.gcp_project_id
+  for_each           = toset(var.gcloud_service_list)
+  project            = var.gcloud_project_id
   service            = each.key
   disable_on_destroy = false
 }
 resource "google_project_service" "iap_api" {
-  project            = var.gcp_project_id
+  project            = var.gcloud_project_id
   service            = "iap.googleapis.com"
   disable_on_destroy = false
 }
 
 // === IAP (Identity-Aware Proxy) Configuration ===
-// We create the OAuth client and point it directly to the existing brand's name.
 resource "google_iap_client" "project_client" {
   display_name = "Fraud Digest IAP Client"
-  // The brand ID must be the project NUMBER, not the project ID.
   brand        = "projects/963241002796/brands/963241002796"
 }
 
 // === Application Infrastructure ===
 resource "google_pubsub_topic" "jobs_topic" {
   name       = var.pubsub_topic_id
-  project    = var.gcp_project_id
+  project    = var.gcloud_project_id
   depends_on = [google_project_service.apis]
 }
 resource "google_artifact_registry_repository" "repo" {
-  project       = var.gcp_project_id
-  location      = var.gcp_region
+  project       = var.gcloud_project_id
+  location      = var.gcloud_region
   repository_id = var.repository_id
   description   = "Docker repository for fraud-digest application"
   format        = "DOCKER"
   depends_on    = [google_project_service.apis]
 }
 resource "google_service_account" "frontend_sa" {
-  project      = var.gcp_project_id
+  project      = var.gcloud_project_id
   account_id   = "${var.frontend_service_name}-sa"
   display_name = "Service Account for Fraud Digest Frontend"
 }
 resource "google_pubsub_topic_iam_member" "publisher" {
-  project = var.gcp_project_id
+  project = var.gcloud_project_id
   topic   = google_pubsub_topic.jobs_topic.name
   role    = "roles/pubsub.publisher"
   member  = "serviceAccount:${google_service_account.frontend_sa.email}"
 }
+
 resource "google_cloud_run_v2_service" "frontend_service" {
-  project             = var.gcp_project_id
+  project             = var.gcloud_project_id
   name                = var.frontend_service_name
-  location            = var.gcp_region
+  location            = var.gcloud_region
   deletion_protection = false
   ingress             = "INGRESS_TRAFFIC_ALL"
   client              = google_iap_client.project_client.client_id
+
   template {
     service_account = google_service_account.frontend_sa.email
     containers {
+      // The initial image is a placeholder. The CI/CD pipeline will update it.
       image = "us-docker.pkg.dev/cloudrun/container/hello"
       env {
         name  = "GCP_PROJECT_ID"
-        value = var.gcp_project_id
+        value = var.gcloud_project_id
       }
       env {
         name  = "PUBSUB_TOPIC_ID"
@@ -80,6 +81,17 @@ resource "google_cloud_run_v2_service" "frontend_service" {
       }
     }
   }
+
+  lifecycle {
+    ignore_changes = [
+      # Ignore changes to the container image and revision, as these are managed by the CI/CD pipeline.
+      template[0].containers[0].image,
+      template[0].revision,
+      latest_ready_revision,
+      latest_created_revision,
+    ]
+  }
+
   depends_on = [google_project_service.apis, google_pubsub_topic_iam_member.publisher]
 }
 
@@ -89,7 +101,7 @@ resource "google_cloud_run_v2_service_iam_member" "iap_invoker" {
   location = google_cloud_run_v2_service.frontend_service.location
   name     = google_cloud_run_v2_service.frontend_service.name
   role     = "roles/run.invoker"
-  member   = "user:${var.gcp_support_email}"
+  member   = "user:${var.gcloud_support_email}"
 }
 
 output "frontend_service_url" {
