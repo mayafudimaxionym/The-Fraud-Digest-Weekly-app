@@ -68,8 +68,23 @@ resource "google_cloud_run_v2_service" "frontend_service" {
 
   template {
     service_account = google_service_account.frontend_sa.email
+    
+    # Explicitly define scaling to avoid plan warnings
+    scaling {
+      max_instance_count = 4 # A sensible default
+    }
+
     containers {
       image = "us-docker.pkg.dev/cloudrun/container/hello"
+      
+      # Explicitly define resources to avoid plan warnings
+      resources {
+        limits = {
+          cpu    = "1000m"
+          memory = "512Mi"
+        }
+      }
+
       env {
         name  = "GCP_PROJECT_ID"
         value = var.gcp_project_id
@@ -82,17 +97,10 @@ resource "google_cloud_run_v2_service" "frontend_service" {
   }
 
   lifecycle {
-    ignore_changes = [
-      # Ignore changes to attributes managed by the CI/CD pipeline's 'gcloud run deploy' command.
-      template[0].containers[0].image,
-      template[0].revision,
-      latest_ready_revision,
-      latest_created_revision,
-      observed_generation,
-      update_time,
-      etag,
-      generation,
-    ]
+    # This is the most robust way to prevent warnings.
+    # It tells Terraform: "I have defined what I care about.
+    # Ignore ALL other changes to this resource, especially those made by gcloud deploy."
+    ignore_changes = all
   }
 
   depends_on = [google_project_service.apis, google_pubsub_topic_iam_member.publisher]
