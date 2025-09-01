@@ -27,7 +27,7 @@ refresh.token
 **/terraform.tfstate
 **/terraform.tfstate.backup
 **/.terraform/
-**/.terraform.lock.hcl
+#**/.terraform.lock.hcl
 **/*.tfvars
 **/override.tf
 **/override.tf.json
