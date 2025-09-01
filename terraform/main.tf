@@ -36,7 +36,7 @@ resource "google_iap_client" "project_client" {
 resource "google_pubsub_topic" "jobs_topic" {
   project    = var.gcp_project_id
   name       = var.pubsub_topic_id
-  labels     = {} # Explicitly define empty labels
+  labels     = {}
   depends_on = [google_project_service.apis]
 }
 resource "google_artifact_registry_repository" "repo" {
@@ -45,14 +45,14 @@ resource "google_artifact_registry_repository" "repo" {
   repository_id = var.repository_id
   description   = "Docker repository for fraud-digest application"
   format        = "DOCKER"
-  labels        = {} # Explicitly define empty labels
+  labels        = {}
   depends_on    = [google_project_service.apis]
 }
 resource "google_service_account" "frontend_sa" {
   project      = var.gcp_project_id
   account_id   = "${var.frontend_service_name}-sa"
   display_name = "Service Account for Fraud Digest Frontend"
-  description  = "" # Explicitly define empty description
+  description  = ""
 }
 resource "google_pubsub_topic_iam_member" "publisher" {
   project = var.gcp_project_id
@@ -71,12 +71,25 @@ resource "google_cloud_run_v2_service" "frontend_service" {
 
   template {
     service_account = google_service_account.frontend_sa.email
-    scaling { max_instance_count = 4 }
+    scaling {
+      max_instance_count = 4
+    }
     containers {
       image = "us-docker.pkg.dev/cloudrun/container/hello"
-      resources { limits = { cpu = "1000m", memory = "512Mi" } }
-      env { name  = "GCP_PROJECT_ID", value = var.gcp_project_id }
-      env { name  = "PUBSUB_TOPIC_ID", value = var.pubsub_topic_id }
+      resources {
+        limits = {
+          cpu    = "1000m"
+          memory = "512Mi"
+        }
+      }
+      env {
+        name  = "GCP_PROJECT_ID"
+        value = var.gcp_project_id
+      }
+      env {
+        name  = "PUBSUB_TOPIC_ID"
+        value = var.pubsub_topic_id
+      }
     }
   }
 
