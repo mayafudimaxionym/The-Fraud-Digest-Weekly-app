@@ -83,10 +83,15 @@ resource "google_cloud_run_v2_service" "frontend_service" {
 
   lifecycle {
     ignore_changes = [
+      # Ignore changes to attributes managed by the CI/CD pipeline's 'gcloud run deploy' command.
       template[0].containers[0].image,
       template[0].revision,
       latest_ready_revision,
       latest_created_revision,
+      observed_generation,
+      update_time,
+      etag,
+      generation,
     ]
   }
 
@@ -105,4 +110,3 @@ resource "google_cloud_run_v2_service_iam_member" "iap_invoker" {
 output "frontend_service_url" {
   value = google_cloud_run_v2_service.frontend_service.uri
 }
-
