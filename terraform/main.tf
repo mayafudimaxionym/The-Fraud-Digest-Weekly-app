@@ -34,8 +34,9 @@ resource "google_iap_client" "project_client" {
 
 // === Application Infrastructure ===
 resource "google_pubsub_topic" "jobs_topic" {
-  name       = var.pubsub_topic_id
   project    = var.gcp_project_id
+  name       = var.pubsub_topic_id
+  labels     = {} # Explicitly define empty labels
   depends_on = [google_project_service.apis]
 }
 resource "google_artifact_registry_repository" "repo" {
@@ -44,12 +45,14 @@ resource "google_artifact_registry_repository" "repo" {
   repository_id = var.repository_id
   description   = "Docker repository for fraud-digest application"
   format        = "DOCKER"
+  labels        = {} # Explicitly define empty labels
   depends_on    = [google_project_service.apis]
 }
 resource "google_service_account" "frontend_sa" {
   project      = var.gcp_project_id
   account_id   = "${var.frontend_service_name}-sa"
   display_name = "Service Account for Fraud Digest Frontend"
+  description  = "" # Explicitly define empty description
 }
 resource "google_pubsub_topic_iam_member" "publisher" {
   project = var.gcp_project_id
@@ -68,38 +71,16 @@ resource "google_cloud_run_v2_service" "frontend_service" {
 
   template {
     service_account = google_service_account.frontend_sa.email
-    
-    # Explicitly define scaling to avoid plan warnings
-    scaling {
-      max_instance_count = 4 # A sensible default
-    }
-
+    scaling { max_instance_count = 4 }
     containers {
       image = "us-docker.pkg.dev/cloudrun/container/hello"
-      
-      # Explicitly define resources to avoid plan warnings
-      resources {
-        limits = {
-          cpu    = "1000m"
-          memory = "512Mi"
-        }
-      }
-
-      env {
-        name  = "GCP_PROJECT_ID"
-        value = var.gcp_project_id
-      }
-      env {
-        name  = "PUBSUB_TOPIC_ID"
-        value = var.pubsub_topic_id
-      }
+      resources { limits = { cpu = "1000m", memory = "512Mi" } }
+      env { name  = "GCP_PROJECT_ID", value = var.gcp_project_id }
+      env { name  = "PUBSUB_TOPIC_ID", value = var.pubsub_topic_id }
     }
   }
 
   lifecycle {
-    # This is the most robust way to prevent warnings.
-    # It tells Terraform: "I have defined what I care about.
-    # Ignore ALL other changes to this resource, especially those made by gcloud deploy."
     ignore_changes = all
   }
 
