@@ -112,3 +112,6 @@ resource "google_cloud_run_v2_service_iam_member" "iap_invoker" {
 output "frontend_service_url" {
   value = google_cloud_run_v2_service.frontend_service.uri
 }
+
+
+// terraform/variables.tf
