@@ -24,7 +24,8 @@ resource "google_project_service" "apis" {
 resource "google_project_service" "extra_apis" {
   for_each = toset([
     "iap.googleapis.com",
-    "eventarc.googleapis.com"
+    "eventarc.googleapis.com",
+    "firestore.googleapis.com" // API for Firestore
   ])
   project            = var.gcp_project_id
   service            = each.key
@@ -47,6 +48,15 @@ resource "google_artifact_registry_repository" "repo" {
   labels        = {}
   depends_on    = [google_project_service.apis]
 }
+// NEW: Create a Firestore database in Native mode
+resource "google_firestore_database" "database" {
+  project     = var.gcp_project_id
+  name        = "(default)"
+  location_id = var.gcp_region
+  type        = "FIRESTORE_NATIVE"
+  depends_on = [google_project_service.extra_apis]
+}
+
 
 // =================================================
 // === FRONTEND INFRASTRUCTURE (Cloud Run + IAP) ===
@@ -113,7 +123,8 @@ resource "google_service_account" "backend_sa" {
 resource "google_project_iam_member" "backend_roles" {
   for_each = toset([
     "roles/aiplatform.user",
-    "roles/secretmanager.secretAccessor"
+    "roles/secretmanager.secretAccessor",
+    "roles/datastore.user" // <-- ADDED ROLE
   ])
   project = var.gcp_project_id
   role    = each.key
