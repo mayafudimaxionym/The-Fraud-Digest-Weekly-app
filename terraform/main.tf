@@ -24,7 +24,7 @@ resource "google_project_service" "apis" {
 resource "google_project_service" "extra_apis" {
   for_each = toset([
     "iap.googleapis.com",
-    "eventarc.googleapis.com" # Add Eventarc API
+    "eventarc.googleapis.com"
   ])
   project            = var.gcp_project_id
   service            = each.key
@@ -80,8 +80,14 @@ resource "google_cloud_run_v2_service" "frontend_service" {
     containers {
       image = "us-docker.pkg.dev/cloudrun/container/hello"
       resources { limits = { cpu = "1000m", memory = "512Mi" } }
-      env { name = "GCP_PROJECT_ID", value = var.gcp_project_id }
-      env { name = "PUBSUB_TOPIC_ID", value = var.pubsub_topic_id }
+      env {
+        name  = "GCP_PROJECT_ID"
+        value = var.gcp_project_id
+      }
+      env {
+        name  = "PUBSUB_TOPIC_ID"
+        value = var.pubsub_topic_id
+      }
     }
   }
   lifecycle { ignore_changes = all }
@@ -115,15 +121,18 @@ resource "google_project_iam_member" "backend_roles" {
 }
 resource "google_cloud_run_v2_service" "backend_service" {
   project             = var.gcp_project_id
-  name                = "fraud-analysis-processor-v2" # From your deploy.yaml
+  name                = "fraud-analysis-processor-v2"
   location            = var.gcp_region
   deletion_protection = false
-  ingress             = "INGRESS_TRAFFIC_INTERNAL_ONLY" # Internal service
+  ingress             = "INGRESS_TRAFFIC_INTERNAL_ONLY"
   template {
     service_account = google_service_account.backend_sa.email
     containers {
-      image = "us-docker.pkg.dev/cloudrun/container/hello" # Placeholder
-      env { name = "GCP_PROJECT", value = var.gcp_project_id }
+      image = "us-docker.pkg.dev/cloudrun/container/hello"
+      env {
+        name  = "GCP_PROJECT"
+        value = var.gcp_project_id
+      }
     }
   }
   lifecycle { ignore_changes = all }
@@ -139,7 +148,7 @@ resource "google_service_account" "eventarc_sa" {
 resource "google_project_iam_member" "eventarc_roles" {
   for_each = toset([
     "roles/eventarc.eventReceiver",
-    "roles/run.invoker" # Allows Eventarc to invoke the Cloud Run service
+    "roles/run.invoker"
   ])
   project = var.gcp_project_id
   role    = each.key
@@ -152,7 +161,7 @@ resource "google_project_iam_member" "pubsub_token_creator" {
 }
 resource "google_eventarc_trigger" "backend_trigger" {
   project         = var.gcp_project_id
-  name            = "fraud-analysis-processor-v2-trigger" # From your deploy.yaml
+  name            = "fraud-analysis-processor-v2-trigger"
   location        = var.gcp_region
   service_account = google_service_account.eventarc_sa.email
 
