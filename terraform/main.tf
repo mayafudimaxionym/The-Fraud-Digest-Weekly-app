@@ -14,25 +14,24 @@ provider "google" {
   region  = var.gcp_region
 }
 
+// === APIs ===
 resource "google_project_service" "apis" {
   for_each           = toset(var.gcp_service_list)
   project            = var.gcp_project_id
   service            = each.key
   disable_on_destroy = false
 }
-resource "google_project_service" "iap_api" {
+resource "google_project_service" "extra_apis" {
+  for_each = toset([
+    "iap.googleapis.com",
+    "eventarc.googleapis.com" # Add Eventarc API
+  ])
   project            = var.gcp_project_id
-  service            = "iap.googleapis.com"
+  service            = each.key
   disable_on_destroy = false
 }
 
-// === IAP (Identity-Aware Proxy) Configuration ===
-resource "google_iap_client" "project_client" {
-  display_name = "Fraud Digest IAP Client"
-  brand        = "projects/963241002796/brands/963241002796"
-}
-
-// === Application Infrastructure ===
+// === Shared Infrastructure ===
 resource "google_pubsub_topic" "jobs_topic" {
   project    = var.gcp_project_id
   name       = var.pubsub_topic_id
@@ -48,6 +47,14 @@ resource "google_artifact_registry_repository" "repo" {
   labels        = {}
   depends_on    = [google_project_service.apis]
 }
+
+// =================================================
+// === FRONTEND INFRASTRUCTURE (Cloud Run + IAP) ===
+// =================================================
+resource "google_iap_client" "project_client" {
+  display_name = "Fraud Digest IAP Client"
+  brand        = "projects/963241002796/brands/963241002796"
+}
 resource "google_service_account" "frontend_sa" {
   project      = var.gcp_project_id
   account_id   = "${var.frontend_service_name}-sa"
@@ -60,7 +67,6 @@ resource "google_pubsub_topic_iam_member" "publisher" {
   role    = "roles/pubsub.publisher"
   member  = "serviceAccount:${google_service_account.frontend_sa.email}"
 }
-
 resource "google_cloud_run_v2_service" "frontend_service" {
   project             = var.gcp_project_id
   name                = var.frontend_service_name
@@ -68,39 +74,19 @@ resource "google_cloud_run_v2_service" "frontend_service" {
   deletion_protection = false
   ingress             = "INGRESS_TRAFFIC_ALL"
   client              = google_iap_client.project_client.client_id
-
   template {
     service_account = google_service_account.frontend_sa.email
-    scaling {
-      max_instance_count = 4
-    }
+    scaling { max_instance_count = 4 }
     containers {
       image = "us-docker.pkg.dev/cloudrun/container/hello"
-      resources {
-        limits = {
-          cpu    = "1000m"
-          memory = "512Mi"
-        }
-      }
-      env {
-        name  = "GCP_PROJECT_ID"
-        value = var.gcp_project_id
-      }
-      env {
-        name  = "PUBSUB_TOPIC_ID"
-        value = var.pubsub_topic_id
-      }
+      resources { limits = { cpu = "1000m", memory = "512Mi" } }
+      env { name = "GCP_PROJECT_ID", value = var.gcp_project_id }
+      env { name = "PUBSUB_TOPIC_ID", value = var.pubsub_topic_id }
     }
   }
-
-  lifecycle {
-    ignore_changes = all
-  }
-
+  lifecycle { ignore_changes = all }
   depends_on = [google_project_service.apis, google_pubsub_topic_iam_member.publisher]
 }
-
-// Grant YOUR user the right to invoke the service (required for IAP).
 resource "google_cloud_run_v2_service_iam_member" "iap_invoker" {
   project  = google_cloud_run_v2_service.frontend_service.project
   location = google_cloud_run_v2_service.frontend_service.location
@@ -109,100 +95,96 @@ resource "google_cloud_run_v2_service_iam_member" "iap_invoker" {
   member   = "user:${var.gcp_support_email}"
 }
 
-output "frontend_service_url" {
-  value = google_cloud_run_v2_service.frontend_service.uri
-}
-
-// terraform/main.tf
-
-// ... (все существующие ресурсы для frontend) ...
-
-// === Backend Infrastructure (Cloud Function) ===
-
-// 6. Создаем сервисный аккаунт специально для Backend функции
+// ===================================================
+// === BACKEND INFRASTRUCTURE (Cloud Run + Eventarc) ===
+// ===================================================
 resource "google_service_account" "backend_sa" {
   project      = var.gcp_project_id
   account_id   = "fraud-digest-backend-sa"
   display_name = "Service Account for Fraud Digest Backend"
+  description  = ""
 }
-
-// 7. Даем сервисному аккаунту Backend права на вызов Vertex AI
-resource "google_project_iam_member" "backend_vertex_ai_user" {
+resource "google_project_iam_member" "backend_roles" {
+  for_each = toset([
+    "roles/aiplatform.user",
+    "roles/secretmanager.secretAccessor"
+  ])
   project = var.gcp_project_id
-  role    = "roles/aiplatform.user"
+  role    = each.key
   member  = "serviceAccount:${google_service_account.backend_sa.email}"
 }
-
-// 8. Даем сервисному аккаунту Backend права на чтение секретов
-resource "google_project_iam_member" "backend_secret_accessor" {
-  project = var.gcp_project_id
-  role    = "roles/secretmanager.secretAccessor"
-  member  = "serviceAccount:${google_service_account.backend_sa.email}"
+resource "google_cloud_run_v2_service" "backend_service" {
+  project             = var.gcp_project_id
+  name                = "fraud-analysis-processor-v2" # From your deploy.yaml
+  location            = var.gcp_region
+  deletion_protection = false
+  ingress             = "INGRESS_TRAFFIC_INTERNAL_ONLY" # Internal service
+  template {
+    service_account = google_service_account.backend_sa.email
+    containers {
+      image = "us-docker.pkg.dev/cloudrun/container/hello" # Placeholder
+      env { name = "GCP_PROJECT", value = var.gcp_project_id }
+    }
+  }
+  lifecycle { ignore_changes = all }
+  depends_on = [google_project_iam_member.backend_roles]
 }
 
-// 9. Создаем саму Cloud Function 2-го поколения
-resource "google_cloudfunctions2_function" "backend_function" {
-  project  = var.gcp_project_id
-  name     = "fraud-digest-backend"
-  location = var.gcp_region
+// --- Eventarc Trigger ---
+resource "google_service_account" "eventarc_sa" {
+  project      = var.gcp_project_id
+  account_id   = "eventarc-trigger-sa"
+  display_name = "Eventarc Trigger Service Account"
+}
+resource "google_project_iam_member" "eventarc_roles" {
+  for_each = toset([
+    "roles/eventarc.eventReceiver",
+    "roles/run.invoker" # Allows Eventarc to invoke the Cloud Run service
+  ])
+  project = var.gcp_project_id
+  role    = each.key
+  member  = "serviceAccount:${google_service_account.eventarc_sa.email}"
+}
+resource "google_project_iam_member" "pubsub_token_creator" {
+  project = var.gcp_project_id
+  role    = "roles/iam.serviceAccountTokenCreator"
+  member  = "serviceAccount:service-${data.google_project.project.number}@gcp-sa-pubsub.iam.gserviceaccount.com"
+}
+resource "google_eventarc_trigger" "backend_trigger" {
+  project         = var.gcp_project_id
+  name            = "fraud-analysis-processor-v2-trigger" # From your deploy.yaml
+  location        = var.gcp_region
+  service_account = google_service_account.eventarc_sa.email
 
-  # Конфигурация сборки: указываем на исходный код
-  build_config {
-    runtime     = "python311" # Убедитесь, что соответствует вашему коду
-    entry_point = "main"      # Имя функции-обработчика в main.py
-    source {
-      storage_source {
-        # Бакет будет автоматически создан gcloud deploy
-        # Это поле обязательно, но gcloud его переопределит
-        bucket = google_storage_bucket.source_bucket.name
-        object = "source.zip" # Имя объекта будет подставлено gcloud
-      }
+  matching_criteria {
+    attribute = "type"
+    value     = "google.cloud.pubsub.topic.v1.messagePublished"
+  }
+
+  destination {
+    cloud_run_service {
+      service = google_cloud_run_v2_service.backend_service.name
+      region  = google_cloud_run_v2_service.backend_service.location
     }
   }
 
-  # Конфигурация запуска: триггеры и сервисный аккаунт
-  service_config {
-    max_instance_count = 3
-    min_instance_count = 0
-    available_memory   = "512Mi"
-    timeout_seconds    = 300
-    service_account_email = google_service_account.backend_sa.email
-    
-    # Триггер, который запускает функцию
-    event_trigger {
-      trigger_region = var.gcp_region
-      event_type     = "google.cloud.pubsub.topic.v1.messagePublished"
-      pubsub_topic   = google_pubsub_topic.jobs_topic.id
-      retry_policy   = "RETRY_POLICY_RETRY" # Автоматически повторять при сбое
+  transport {
+    pubsub {
+      topic = google_pubsub_topic.jobs_topic.id
     }
   }
-
   depends_on = [
-    google_project_iam_member.backend_vertex_ai_user,
-    google_project_iam_member.backend_secret_accessor
+    google_project_iam_member.eventarc_roles,
+    google_project_iam_member.pubsub_token_creator
   ]
 }
 
-// 10. Создаем бакет для исходного кода Cloud Functions (требуется Terraform)
-resource "google_storage_bucket" "source_bucket" {
-  project      = var.gcp_project_id
-  name         = "${var.gcp_project_id}-cf-source" # Имя должно быть уникальным
-  location     = var.gcp_region
-  uniform_bucket_level_access = true
-}
-
-// 11. Разрешаем Pub/Sub создавать токены для вызова нашей (приватной) Cloud Function
-resource "google_project_iam_member" "pubsub_invoker" {
-  project = var.gcp_project_id
-  role    = "roles/run.invoker"
-  # Специальный сервисный аккаунт, принадлежащий Pub/Sub
-  member  = "serviceAccount:service-${data.google_project.project.number}@gcp-sa-pubsub.iam.gserviceaccount.com"
-}
-
-// Data source для получения номера проекта (нужен для pubsub_invoker)
+// Data source to get the project number
 data "google_project" "project" {
   project_id = var.gcp_project_id
 }
 
-
-// terraform/variables.tf
+// === Outputs ===
+output "frontend_service_url" {
+  value = google_cloud_run_v2_service.frontend_service.uri
+}
