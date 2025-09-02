@@ -284,4 +284,3 @@ def _handle_message(cloud_event):
         body = f"<h1>Analysis Complete</h1><p>The analysis for {url} is complete and has been saved. You can view the results in the application soon.</p>"
     
     send_notification_email(email, subject, body)
-    

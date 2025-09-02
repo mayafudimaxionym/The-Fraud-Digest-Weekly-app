@@ -11,14 +11,13 @@ ENV PYTHONUNBUFFERED 1
 WORKDIR /app
 
 # Stage 3: Install dependencies
-# Copy only the requirements file first to leverage Docker layer caching
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Stage 4: Copy the backend application code
 COPY . .
 
-# Stage 5: Define the command to run the application with Gunicorn
-# Gunicorn is a production-ready web server for Python.
+# Stage 5: Define the command to run the application using the Functions Framework.
+# This is the standard way to run a function designed with this framework.
 # Cloud Run provides the $PORT environment variable.
-CMD exec gunicorn --bind :$PORT --workers 1 --threads 8 --timeout 0 main:main
+CMD exec functions-framework --target=main --signature-type=cloudevent --port=$PORT
