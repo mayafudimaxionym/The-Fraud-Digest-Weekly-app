@@ -10,7 +10,7 @@ on:
       - 'backend/**'
       - 'terraform/**'
       - '.github/workflows/deploy-all.yml'
-      - 'Dockerfile' # Root Dockerfile for frontend
+      - 'Dockerfile'
   workflow_dispatch:
 
 env:
@@ -56,15 +56,9 @@ jobs:
       matrix:
         service:
           - name: 'fraud-digest-frontend'
-            # Для frontend, контекст сборки - это весь репозиторий,
-            # так как Dockerfile лежит в корне и копирует из 'frontend/'
-            source: '.' 
-            dockerfile: 'Dockerfile'
+            source: '.'
           - name: 'fraud-analysis-processor-v2'
-            # Для backend, контекст сборки - это папка 'backend',
-            # и Dockerfile находится внутри нее.
             source: './backend'
-            dockerfile: './backend/Dockerfile'
 
     steps:
       - name: Checkout repository
@@ -81,8 +75,7 @@ jobs:
           gcloud builds submit ${{ matrix.service.source }} \
             --project=${{ env.GCP_PROJECT_ID }} \
             --region=${{ env.GCP_REGION }} \
-            --tag=${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.REPOSITORY_ID }}/${{ matrix.service.name }}:${{ github.sha }} \
-            --file=${{ matrix.service.dockerfile }}
+            --tag=${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.REPOSITORY_ID }}/${{ matrix.service.name }}:${{ github.sha }}
       - name: Deploy to Cloud Run
         run: |
           gcloud run deploy ${{ matrix.service.name }} \
@@ -95,4 +88,5 @@ jobs:
         run: |
           SERVICE_URL=$(gcloud run services describe ${{ matrix.service.name }} --project=${{ env.GCP_PROJECT_ID }} --region=${{ env.GCP_REGION }} --format='value(status.url)')
           echo "${{ matrix.service.name }} is deployed at: $SERVICE_URL"
+
           
