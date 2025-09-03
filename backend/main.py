@@ -60,8 +60,8 @@ def initialize_vertex_ai():
         try:
             vertexai.init(project=PROJECT_ID, location=REGION)
             # Use the correct and available model name for fast, efficient tasks.
-            gemini_model = GenerativeModel("gemini-1.5-flash-001")
-            logging.info("Vertex AI initialized successfully with gemini-1.5-flash-001.")
+            gemini_model = GenerativeModel("gemini-2.5-flash")
+            logging.info("Vertex AI initialized successfully with gemini-2.5-flash.")
             return True
         except Exception as e:
             logging.error(f"Failed to initialize Vertex AI: {e}", exc_info=True)
