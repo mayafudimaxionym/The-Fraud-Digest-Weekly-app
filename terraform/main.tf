@@ -18,7 +18,6 @@ provider "google" {
   region  = var.gcp_region
 }
 
-// ... (APIs, Shared Infra, Frontend Infra - все без изменений) ...
 // === APIs ===
 resource "google_project_service" "apis" {
   for_each           = toset(var.gcp_service_list)
@@ -112,121 +111,6 @@ resource "google_cloud_run_v2_service_iam_member" "iap_invoker" {
   name     = google_cloud_run_v2_service.frontend_service.name
   role     = "roles/run.invoker"
   member   = "user:${var.gcp_support_email}"
-}
-
-// ===================================================
-// === BACKEND INFRASTRUCTURE (Cloud Run + Eventarc) ===
-// ===================================================
-resource "google_service_account" "backend_sa" {
-  project      = var.gcp_project_id
-  account_id   = "fraud-digest-backend-sa"
-  display_name = "Service Account for Fraud Digest Backend"
-  description  = ""
-}
-resource "google_project_iam_member" "backend_roles" {
-  for_each = toset([
-    "roles/aiplatform.user",
-    "roles/secretmanager.secretAccessor",
-    "roles/datastore.user"
-  ])
-  project = var.gcp_project_id
-  role    = each.key
-  member  = "serviceAccount:${google_service_account.backend_sa.email}"
-}
-resource "google_cloud_run_v2_service" "backend_service" {
-  project             = var.gcp_project_id
-  name                = "fraud-analysis-processor-v2"
-  location            = var.gcp_region
-  deletion_protection = false
-  ingress             = "INGRESS_TRAFFIC_INTERNAL_ONLY"
-  template {
-    service_account = google_service_account.backend_sa.email
-    containers {
-      image = "us-docker.pkg.dev/cloudrun/container/hello"
-      env {
-        name  = "GCP_PROJECT"
-        value = var.gcp_project_id
-      }
-    }
-  }
-  lifecycle { ignore_changes = all }
-  depends_on = [google_project_iam_member.backend_roles]
-}
-
-// --- Eventarc Trigger ---
-resource "google_service_account" "eventarc_sa" {
-  project      = var.gcp_project_id
-  account_id   = "eventarc-trigger-sa"
-  display_name = "Eventarc Trigger Service Account"
-}
-resource "google_project_iam_member" "eventarc_roles" {
-  for_each = toset([
-    "roles/eventarc.eventReceiver",
-    "roles/run.invoker"
-  ])
-  project = var.gcp_project_id
-  role    = each.key
-  member  = "serviceAccount:${google_service_account.eventarc_sa.email}"
-}
-resource "google_project_iam_member" "pubsub_token_creator" {
-  project = var.gcp_project_id
-  role    = "roles/iam.serviceAccountTokenCreator"
-  member  = "serviceAccount:service-${data.google_project.project.number}@gcp-sa-pubsub.iam.gserviceaccount.com"
-}
-
-// Step 1: Let Eventarc create the trigger and its own subscription
-resource "google_eventarc_trigger" "backend_trigger" {
-  project         = var.gcp_project_id
-  name            = "fraud-analysis-processor-v2-trigger"
-  location        = var.gcp_region
-  service_account = google_service_account.eventarc_sa.email
-
-  matching_criteria {
-    attribute = "type"
-    value     = "google.cloud.pubsub.topic.v1.messagePublished"
-  }
-
-  destination {
-    cloud_run_service {
-      service = google_cloud_run_v2_service.backend_service.name
-      region  = google_cloud_run_v2_service.backend_service.location
-    }
-  }
-
-  transport {
-    pubsub {
-      topic = google_pubsub_topic.jobs_topic.id
-    }
-  }
-  depends_on = [
-    google_project_iam_member.eventarc_roles,
-    google_project_iam_member.pubsub_token_creator
-  ]
-}
-
-// Step 2: Wait for 30 seconds after the trigger is created to ensure its subscription exists
-resource "time_sleep" "wait_for_subscription" {
-  create_duration = "30s"
-  depends_on      = [google_eventarc_trigger.backend_trigger]
-}
-
-// Step 3: "Adopt" the subscription created by Eventarc to update its ack_deadline
-resource "google_pubsub_subscription" "eventarc_sub_update" {
-  project = var.gcp_project_id
-  # Use basename() to extract the short name from the full subscription path
-  name                   = basename(google_eventarc_trigger.backend_trigger.transport[0].pubsub[0].subscription)
-  topic                  = google_eventarc_trigger.backend_trigger.transport[0].pubsub[0].topic
-  ack_deadline_seconds   = 60
-
-  lifecycle {
-    ignore_changes = [
-      name, topic, labels, message_retention_duration, retain_acked_messages,
-      expiration_policy, filter, enable_exactly_once_delivery,
-      enable_message_ordering, retry_policy, dead_letter_policy,
-    ]
-  }
-  
-  depends_on = [time_sleep.wait_for_subscription]
 }
 
 // Data source to get the project number
