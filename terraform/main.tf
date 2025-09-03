@@ -6,10 +6,6 @@ terraform {
       source  = "hashicorp/google"
       version = ">= 4.50.0"
     }
-    time = {
-      source  = "hashicorp/time"
-      version = ">= 0.9.1"
-    }
   }
 }
 
@@ -18,6 +14,7 @@ provider "google" {
   region  = var.gcp_region
 }
 
+// ... (APIs, Shared Infra, Frontend Infra - все без изменений) ...
 // === APIs ===
 resource "google_project_service" "apis" {
   for_each           = toset(var.gcp_service_list)
@@ -105,30 +102,93 @@ resource "google_cloud_run_v2_service" "frontend_service" {
   lifecycle { ignore_changes = all }
   depends_on = [google_project_service.apis, google_pubsub_topic_iam_member.publisher]
 }
-resource "google_cloud_run_v2_service" "backend_service" {
-  project             = var.gcp_project_id
-  name                = "fraud-analysis-processor-v2"
-  location            = var.gcp_region
-  deletion_protection = false // <-- ВАЖНАЯ СТРОКА
-  ingress             = "INGRESS_TRAFFIC_INTERNAL_ONLY"
-  
-  template {
-    // Нам нужен минимальный шаблон, чтобы Terraform был доволен
-    containers {
-      image = "us-docker.pkg.dev/cloudrun/container/hello"
-    }
-  }
-  lifecycle {
-    ignore_changes = all
-  }
-}
-
 resource "google_cloud_run_v2_service_iam_member" "iap_invoker" {
   project  = google_cloud_run_v2_service.frontend_service.project
   location = google_cloud_run_v2_service.frontend_service.location
   name     = google_cloud_run_v2_service.frontend_service.name
   role     = "roles/run.invoker"
   member   = "user:${var.gcp_support_email}"
+}
+
+// ===================================================
+// === BACKEND INFRASTRUCTURE (Cloud Run + Pub/Sub Push) ===
+// ===================================================
+resource "google_service_account" "backend_sa" {
+  project      = var.gcp_project_id
+  account_id   = "fraud-digest-backend-sa"
+  display_name = "Service Account for Fraud Digest Backend"
+  description  = ""
+}
+resource "google_project_iam_member" "backend_roles" {
+  for_each = toset([
+    "roles/aiplatform.user",
+    "roles/secretmanager.secretAccessor",
+    "roles/datastore.user"
+  ])
+  project = var.gcp_project_id
+  role    = each.key
+  member  = "serviceAccount:${google_service_account.backend_sa.email}"
+}
+resource "google_cloud_run_v2_service" "backend_service" {
+  project             = var.gcp_project_id
+  name                = "fraud-analysis-processor-v2"
+  location            = var.gcp_region
+  deletion_protection = false
+  ingress             = "INGRESS_TRAFFIC_INTERNAL_ONLY"
+  template {
+    service_account = google_service_account.backend_sa.email
+    containers {
+      image = "us-docker.pkg.dev/cloudrun/container/hello"
+      env {
+        name  = "GCP_PROJECT"
+        value = var.gcp_project_id
+      }
+    }
+  }
+  lifecycle { ignore_changes = all }
+  depends_on = [google_project_iam_member.backend_roles]
+}
+
+// --- Pub/Sub Push Subscription ---
+// Create a dedicated service account for Pub/Sub to use for push authentication
+resource "google_service_account" "pubsub_push_sa" {
+  project      = var.gcp_project_id
+  account_id   = "pubsub-push-invoker-sa"
+  display_name = "Pub/Sub Push Invoker SA"
+}
+
+// Grant this new SA the permission to invoke our backend service
+resource "google_cloud_run_v2_service_iam_member" "pubsub_invoker" {
+  project  = google_cloud_run_v2_service.backend_service.project
+  location = google_cloud_run_v2_service.backend_service.location
+  name     = google_cloud_run_v2_service.backend_service.name
+  role     = "roles/run.invoker"
+  member   = "serviceAccount:${google_service_account.pubsub_push_sa.email}"
+}
+
+// Grant the Google-managed Pub/Sub service agent permission to impersonate our push SA
+resource "google_service_account_iam_member" "pubsub_impersonator" {
+  service_account_id = google_service_account.pubsub_push_sa.name
+  role               = "roles/iam.serviceAccountTokenCreator"
+  member             = "serviceAccount:service-${data.google_project.project.number}@gcp-sa-pubsub.iam.gserviceaccount.com"
+}
+
+// Create the Push subscription
+resource "google_pubsub_subscription" "backend_push_subscription" {
+  project              = var.gcp_project_id
+  name                 = "backend-push-subscription"
+  topic                = google_pubsub_topic.jobs_topic.name
+  ack_deadline_seconds = 60
+
+  push_config {
+    push_endpoint = google_cloud_run_v2_service.backend_service.uri
+
+    oidc_token {
+      service_account_email = google_service_account.pubsub_push_sa.email
+    }
+  }
+
+  depends_on = [google_cloud_run_v2_service_iam_member.pubsub_invoker]
 }
 
 // Data source to get the project number
