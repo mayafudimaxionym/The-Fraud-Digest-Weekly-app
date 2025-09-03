@@ -105,6 +105,24 @@ resource "google_cloud_run_v2_service" "frontend_service" {
   lifecycle { ignore_changes = all }
   depends_on = [google_project_service.apis, google_pubsub_topic_iam_member.publisher]
 }
+resource "google_cloud_run_v2_service" "backend_service" {
+  project             = var.gcp_project_id
+  name                = "fraud-analysis-processor-v2"
+  location            = var.gcp_region
+  deletion_protection = false // <-- ВАЖНАЯ СТРОКА
+  ingress             = "INGRESS_TRAFFIC_INTERNAL_ONLY"
+  
+  template {
+    // Нам нужен минимальный шаблон, чтобы Terraform был доволен
+    containers {
+      image = "us-docker.pkg.dev/cloudrun/container/hello"
+    }
+  }
+  lifecycle {
+    ignore_changes = all
+  }
+}
+
 resource "google_cloud_run_v2_service_iam_member" "iap_invoker" {
   project  = google_cloud_run_v2_service.frontend_service.project
   location = google_cloud_run_v2_service.frontend_service.location
