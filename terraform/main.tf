@@ -6,7 +6,6 @@ terraform {
       source  = "hashicorp/google"
       version = ">= 4.50.0"
     }
-    # Add the time provider
     time = {
       source  = "hashicorp/time"
       version = ">= 0.9.1"
@@ -205,16 +204,17 @@ resource "google_eventarc_trigger" "backend_trigger" {
   ]
 }
 
-// NEW: Wait for 30 seconds after the trigger is created to ensure its subscription exists
+// Step 2: Wait for 30 seconds after the trigger is created to ensure its subscription exists
 resource "time_sleep" "wait_for_subscription" {
   create_duration = "30s"
   depends_on      = [google_eventarc_trigger.backend_trigger]
 }
 
-// Step 2: "Adopt" the subscription created by Eventarc to update its ack_deadline
+// Step 3: "Adopt" the subscription created by Eventarc to update its ack_deadline
 resource "google_pubsub_subscription" "eventarc_sub_update" {
-  project                = var.gcp_project_id
-  name                   = trimsuffix(google_eventarc_trigger.backend_trigger.transport[0].pubsub[0].subscription, "}")
+  project = var.gcp_project_id
+  # Use basename() to extract the short name from the full subscription path
+  name                   = basename(google_eventarc_trigger.backend_trigger.transport[0].pubsub[0].subscription)
   topic                  = google_eventarc_trigger.backend_trigger.transport[0].pubsub[0].topic
   ack_deadline_seconds   = 60
 
@@ -226,7 +226,6 @@ resource "google_pubsub_subscription" "eventarc_sub_update" {
     ]
   }
   
-  # This resource now depends on the time_sleep resource
   depends_on = [time_sleep.wait_for_subscription]
 }
 
