@@ -14,6 +14,7 @@ provider "google" {
   region  = var.gcp_region
 }
 
+// ... (APIs, Shared Infra, Frontend Infra - все без изменений) ...
 // === APIs ===
 resource "google_project_service" "apis" {
   for_each           = toset(var.gcp_service_list)
@@ -149,15 +150,6 @@ resource "google_cloud_run_v2_service" "backend_service" {
 }
 
 // --- Eventarc Trigger ---
-// NEW: Explicitly create the Pub/Sub subscription for the trigger
-resource "google_pubsub_subscription" "eventarc_sub" {
-  project                = var.gcp_project_id
-  name                   = "eventarc-trigger-sub-manual" # Give it a clear, manageable name
-  topic                  = google_pubsub_topic.jobs_topic.id
-  ack_deadline_seconds   = 60 # Increase deadline to 60s to handle cold starts
-  message_retention_duration = "604800s" # 7 days
-}
-
 resource "google_service_account" "eventarc_sa" {
   project      = var.gcp_project_id
   account_id   = "eventarc-trigger-sa"
@@ -177,6 +169,8 @@ resource "google_project_iam_member" "pubsub_token_creator" {
   role    = "roles/iam.serviceAccountTokenCreator"
   member  = "serviceAccount:service-${data.google_project.project.number}@gcp-sa-pubsub.iam.gserviceaccount.com"
 }
+
+// Step 1: Let Eventarc create the trigger and its own subscription
 resource "google_eventarc_trigger" "backend_trigger" {
   project         = var.gcp_project_id
   name            = "fraud-analysis-processor-v2-trigger"
@@ -197,14 +191,39 @@ resource "google_eventarc_trigger" "backend_trigger" {
 
   transport {
     pubsub {
-      # Point the trigger to our manually created subscription
-      subscription = google_pubsub_subscription.eventarc_sub.id
+      topic = google_pubsub_topic.jobs_topic.id
     }
   }
   depends_on = [
     google_project_iam_member.eventarc_roles,
     google_project_iam_member.pubsub_token_creator
   ]
+}
+
+// Step 2: "Adopt" the subscription created by Eventarc to update its ack_deadline
+resource "google_pubsub_subscription" "eventarc_sub_update" {
+  project                = var.gcp_project_id
+  // Use the subscription name that Eventarc generates
+  name                   = trimsuffix(google_eventarc_trigger.backend_trigger.transport[0].pubsub[0].subscription, "}")
+  topic                  = google_eventarc_trigger.backend_trigger.transport[0].pubsub[0].topic
+  ack_deadline_seconds   = 60 // Set the desired ack deadline
+
+  # Tell Terraform to only manage the ack_deadline and ignore other fields
+  lifecycle {
+    ignore_changes = [
+      name,
+      topic,
+      labels,
+      message_retention_duration,
+      retain_acked_messages,
+      expiration_policy,
+      filter,
+      enable_exactly_once_delivery,
+      enable_message_ordering,
+      retry_policy,
+      dead_letter_policy,
+    ]
+  }
 }
 
 // Data source to get the project number
