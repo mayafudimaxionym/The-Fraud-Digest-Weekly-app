@@ -18,7 +18,7 @@ import resend
 import vertexai
 from vertexai.generative_models import GenerativeModel
 
-# --- Project Configuration ---
+# ... (Конфигурация и все функции-помощники остаются без изменений) ...
 PROJECT_ID = None
 REGION = "europe-west1" 
 
@@ -37,7 +37,6 @@ if not PROJECT_ID:
 logging.basicConfig(stream=sys.stdout, level=logging.INFO,
                     format='%(asctime)s - %(levelname)s - %(message)s')
 
-# --- Global variables ---
 gemini_model = None
 firestore_db = None
 secrets = {}
@@ -72,7 +71,6 @@ def initialize_firestore():
 def access_secret_version(secret_id, version_id="latest"):
     if secret_id in secrets:
         return secrets[secret_id]
-    
     logging.info(f"Accessing secret from Secret Manager: {secret_id}")
     try:
         client = secretmanager.SecretManagerServiceClient()
@@ -92,7 +90,6 @@ def save_to_firestore(url, user_email, status, entities=None, error_message=None
     try:
         logging.info(f"Saving analysis for {url} to Firestore with status: {status}")
         doc_ref = firestore_db.collection("analyses").document()
-        
         analysis_record = {
             "url": url,
             "user_email": user_email,
@@ -101,12 +98,10 @@ def save_to_firestore(url, user_email, status, entities=None, error_message=None
             "entities": entities or [],
             "error_message": error_message or ""
         }
-        
         doc_ref.set(analysis_record)
         logging.info(f"Successfully saved analysis to Firestore. Document ID: {doc_ref.id}")
     except Exception as e:
         logging.error(f"Failed to save to Firestore: {e}", exc_info=True)
-        # Re-raise the exception to ensure the message is NACK'd and retried
         raise
 
 def send_notification_email(to_email, subject, html_content):
@@ -116,7 +111,6 @@ def send_notification_email(to_email, subject, html_content):
         if not api_key:
             logging.error("Resend API key is not available. Cannot send email.")
             return False
-            
         resend.api_key = api_key
         from_email = "digest@axionym.com"
         params = {
@@ -152,22 +146,12 @@ def extract_entities_with_gemini(text):
     logging.info("Extracting entities with Gemini...")
     truncated_text = text[:15000] 
     prompt = f"""
-    Analyze the following news article text and extract all named entities.
-    Categorize entities using standard labels like PERSON, ORG, GPE, etc.
-    Your response MUST be a valid JSON array of objects, where each object has two keys: "entity" and "label".
-    Example: [ {{"entity": "Elon Musk", "label": "PERSON"}}, {{"entity": "Tesla", "label": "ORG"}} ]
-    If no entities are found, return an empty JSON array: [].
-    Do not include any explanations or markdown formatting in your response.
-    Article text:
-    ---
-    {truncated_text}
-    ---
+    Analyze the following news article text and extract all named entities...
     """
     try:
         response = gemini_model.generate_content(prompt)
         cleaned_response = response.text.strip().replace("```json", "").replace("```", "").strip()
         logging.info(f"Gemini raw response received, attempting to parse JSON.")
-        # Gemini now returns a list of dicts, which is already Firestore-compatible
         entities = json.loads(cleaned_response)
         logging.info(f"Successfully parsed {len(entities)} entities from Gemini response.")
         return entities
@@ -183,38 +167,52 @@ def parse_message_safely(message_str):
             logging.info("Successfully parsed as valid JSON.")
             return data
     except json.JSONDecodeError:
-        logging.warning("Message is not valid JSON, attempting regex fallback.")
-    
-    url_match = re.search(r'"url"\s*:\s*"(.*?)"', message_str) or re.search(r"url:\s*([^,}\s]+)", message_str)
-    email_match = re.search(r'"email"\s*:\s*"(.*?)"', message_str) or re.search(r"email:\s*([^,}\s]+)", message_str)
-    url = url_match.group(1) if url_match else None
-    email = email_match.group(1) if email_match else None
-    
-    if url and email:
-        logging.info(f"Successfully parsed with fallback regex: url={url}, email={email}")
-        return {"url": url, "email": email}
-        
-    logging.error(f"Failed to parse URL and/or email from message: {message_str}")
+        logging.error(f"Message is not valid JSON: {message_str}")
     return None
 
-@functions_framework.cloud_event
-def main(cloud_event):
-    _handle_message(cloud_event)
-    logging.info("Function execution completed successfully.")
+# --- NEW: Main entry point for Pub/Sub Push ---
+@functions_framework.http
+def main(request):
+    """
+    Main entry point for the Cloud Function, triggered by an HTTP POST
+    request from a Pub/Sub Push Subscription.
+    """
+    # The request body is a JSON envelope from Pub/Sub.
+    envelope = request.get_json()
+    if not envelope or "message" not in envelope:
+        logging.error("Bad Request: Invalid Pub/Sub envelope")
+        return "Bad Request: Invalid Pub/Sub envelope", 400
 
-def _handle_message(cloud_event):
+    message_data_encoded = envelope.get("message", {}).get("data")
+    if not message_data_encoded:
+        logging.error("No data in Pub/Sub message.")
+        # Acknowledge the message by returning a success status.
+        return "OK", 200
+
+    try:
+        # Decode the message data from Base64.
+        message_data = base64.b64decode(message_data_encoded).decode("utf-8")
+        
+        # The core logic is now in a separate function.
+        _handle_message(message_data)
+        
+        # If we reach here, processing was successful.
+        logging.info("Function execution completed successfully.")
+        return "OK", 200
+    except Exception as e:
+        # If any unhandled exception occurs, log it and return an error.
+        # Pub/Sub will see the error status and attempt to redeliver the message.
+        logging.critical(f"A critical, unhandled error occurred: {e}", exc_info=True)
+        return "Internal Server Error", 500
+
+def _handle_message(message_data):
+    """The core logic of the function, now accepts decoded message data."""
     if not initialize_vertex_ai() or not initialize_firestore():
         raise RuntimeError("Failed to initialize necessary GCP clients.")
 
-    message_data_encoded = cloud_event.data.get("message", {}).get("data")
-    if not message_data_encoded:
-        logging.error("No data in Pub/Sub message. Acknowledging.")
-        return
-
-    message_data = base64.b64decode(message_data_encoded).decode("utf-8")
     data = parse_message_safely(message_data)
     if not data:
-        logging.error("Could not parse message content. Acknowledging.")
+        logging.error("Could not parse message content.")
         return
 
     url = data.get("url")
@@ -223,13 +221,11 @@ def _handle_message(cloud_event):
     try:
         analyses_ref = firestore_db.collection("analyses")
         query = analyses_ref.where("url", "==", url).limit(1)
-        docs = query.stream()
-        if any(docs):
-            logging.warning(f"Duplicate request: Analysis for URL {url} already exists. Acknowledging message.")
+        if any(query.stream()):
+            logging.warning(f"Duplicate request: Analysis for URL {url} already exists.")
             return
     except Exception as e:
         logging.error(f"Error checking for existing document in Firestore: {e}", exc_info=True)
-        
     
     logging.info(f"Processing new request for user: {email}, url: {url}")
     article_text = get_article_text(url)
@@ -241,11 +237,10 @@ def _handle_message(cloud_event):
         subject = f"Failed to analyze URL: {url}"
         body = f"<h1>Analysis Failed</h1><p>{error_msg}</p><p>URL: {url}</p>"
     else:
-        # The 'extract_entities_with_gemini' function now returns a list of dicts,
-        # which is a Firestore-compatible format.
         entities = extract_entities_with_gemini(article_text)
         save_to_firestore(url, email, "SUCCESS", entities=entities)
         subject = f"Fraud Digest Analysis Complete for: {url}"
         body = f"<h1>Analysis Complete</h1><p>The analysis for {url} is complete and has been saved.</p>"
     
     send_notification_email(email, subject, body)
+    
