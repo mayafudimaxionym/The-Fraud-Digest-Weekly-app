@@ -6,6 +6,11 @@ terraform {
       source  = "hashicorp/google"
       version = ">= 4.50.0"
     }
+    # Add the time provider
+    time = {
+      source  = "hashicorp/time"
+      version = ">= 0.9.1"
+    }
   }
 }
 
@@ -200,30 +205,29 @@ resource "google_eventarc_trigger" "backend_trigger" {
   ]
 }
 
+// NEW: Wait for 30 seconds after the trigger is created to ensure its subscription exists
+resource "time_sleep" "wait_for_subscription" {
+  create_duration = "30s"
+  depends_on      = [google_eventarc_trigger.backend_trigger]
+}
+
 // Step 2: "Adopt" the subscription created by Eventarc to update its ack_deadline
 resource "google_pubsub_subscription" "eventarc_sub_update" {
   project                = var.gcp_project_id
-  // Use the subscription name that Eventarc generates
   name                   = trimsuffix(google_eventarc_trigger.backend_trigger.transport[0].pubsub[0].subscription, "}")
   topic                  = google_eventarc_trigger.backend_trigger.transport[0].pubsub[0].topic
-  ack_deadline_seconds   = 60 // Set the desired ack deadline
+  ack_deadline_seconds   = 60
 
-  # Tell Terraform to only manage the ack_deadline and ignore other fields
   lifecycle {
     ignore_changes = [
-      name,
-      topic,
-      labels,
-      message_retention_duration,
-      retain_acked_messages,
-      expiration_policy,
-      filter,
-      enable_exactly_once_delivery,
-      enable_message_ordering,
-      retry_policy,
-      dead_letter_policy,
+      name, topic, labels, message_retention_duration, retain_acked_messages,
+      expiration_policy, filter, enable_exactly_once_delivery,
+      enable_message_ordering, retry_policy, dead_letter_policy,
     ]
   }
+  
+  # This resource now depends on the time_sleep resource
+  depends_on = [time_sleep.wait_for_subscription]
 }
 
 // Data source to get the project number
