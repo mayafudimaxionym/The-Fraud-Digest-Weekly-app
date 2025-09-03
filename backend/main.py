@@ -243,32 +243,43 @@ def main(cloud_event):
     _handle_message(cloud_event)
     logging.info("Function execution completed successfully.")
 
+# backend/main.py
+
 def _handle_message(cloud_event):
     """The core logic of the function."""
     logging.info("Core message handling started.")
     
-    # Initialize clients. If any fails, log the error and exit.
-    # The exception will be caught by the framework, causing a NACK.
     if not initialize_vertex_ai() or not initialize_firestore():
-        logging.critical("Aborting due to failed client initialization.")
-        # Raising an exception is better than returning, as it signals a retryable error.
         raise RuntimeError("Failed to initialize necessary GCP clients.")
 
     message_data_encoded = cloud_event.data.get("message", {}).get("data")
     if not message_data_encoded:
-        logging.error("No data in Pub/Sub message. Acknowledging to remove from queue.")
-        return # Exit gracefully, message will be ACK'd
+        logging.error("No data in Pub/Sub message. Acknowledging.")
+        return
 
     message_data = base64.b64decode(message_data_encoded).decode("utf-8")
     data = parse_message_safely(message_data)
     if not data:
-        logging.error("Could not parse message content. Acknowledging to remove from queue.")
-        return # Exit gracefully, message will be ACK'd
+        logging.error("Could not parse message content. Acknowledging.")
+        return
 
     url = data.get("url")
     email = data.get("email")
 
-    logging.info(f"Processing request for user: {email}, url: {url}")
+    # --- IDEMPOTENCY CHECK ---
+    # Check if an analysis for this URL already exists to prevent duplicates.
+    try:
+        analyses_ref = firestore_db.collection("analyses")
+        query = analyses_ref.where("url", "==", url).limit(1)
+        docs = query.stream()
+        if any(docs):
+            logging.warning(f"Duplicate request: Analysis for URL {url} already exists. Acknowledging message.")
+            return # Exit gracefully, message will be ACK'd
+    except Exception as e:
+        logging.error(f"Error checking for existing document in Firestore: {e}", exc_info=True)
+        # Proceed with caution, but don't fail the whole function
+    
+    logging.info(f"Processing new request for user: {email}, url: {url}")
     article_text = get_article_text(url)
     
     if not article_text:
@@ -281,6 +292,7 @@ def _handle_message(cloud_event):
         entities = extract_entities_with_gemini(article_text)
         save_to_firestore(url, email, "SUCCESS", entities=entities)
         subject = f"Fraud Digest Analysis Complete for: {url}"
-        body = f"<h1>Analysis Complete</h1><p>The analysis for {url} is complete and has been saved. You can view the results in the application soon.</p>"
+        body = f"<h1>Analysis Complete</h1><p>The analysis for {url} is complete and has been saved.</p>"
     
     send_notification_email(email, subject, body)
+    

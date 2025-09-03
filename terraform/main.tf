@@ -25,7 +25,7 @@ resource "google_project_service" "extra_apis" {
   for_each = toset([
     "iap.googleapis.com",
     "eventarc.googleapis.com",
-    "firestore.googleapis.com" // API for Firestore
+    "firestore.googleapis.com"
   ])
   project            = var.gcp_project_id
   service            = each.key
@@ -48,15 +48,13 @@ resource "google_artifact_registry_repository" "repo" {
   labels        = {}
   depends_on    = [google_project_service.apis]
 }
-// NEW: Create a Firestore database in Native mode
 resource "google_firestore_database" "database" {
   project     = var.gcp_project_id
   name        = "(default)"
   location_id = var.gcp_region
   type        = "FIRESTORE_NATIVE"
-  depends_on = [google_project_service.extra_apis]
+  depends_on  = [google_project_service.extra_apis]
 }
-
 
 // =================================================
 // === FRONTEND INFRASTRUCTURE (Cloud Run + IAP) ===
@@ -124,7 +122,7 @@ resource "google_project_iam_member" "backend_roles" {
   for_each = toset([
     "roles/aiplatform.user",
     "roles/secretmanager.secretAccessor",
-    "roles/datastore.user" // <-- ADDED ROLE
+    "roles/datastore.user"
   ])
   project = var.gcp_project_id
   role    = each.key
@@ -151,6 +149,15 @@ resource "google_cloud_run_v2_service" "backend_service" {
 }
 
 // --- Eventarc Trigger ---
+// NEW: Explicitly create the Pub/Sub subscription for the trigger
+resource "google_pubsub_subscription" "eventarc_sub" {
+  project                = var.gcp_project_id
+  name                   = "eventarc-trigger-sub-manual" # Give it a clear, manageable name
+  topic                  = google_pubsub_topic.jobs_topic.id
+  ack_deadline_seconds   = 60 # Increase deadline to 60s to handle cold starts
+  message_retention_duration = "604800s" # 7 days
+}
+
 resource "google_service_account" "eventarc_sa" {
   project      = var.gcp_project_id
   account_id   = "eventarc-trigger-sa"
@@ -190,7 +197,8 @@ resource "google_eventarc_trigger" "backend_trigger" {
 
   transport {
     pubsub {
-      topic = google_pubsub_topic.jobs_topic.id
+      # Point the trigger to our manually created subscription
+      subscription = google_pubsub_subscription.eventarc_sub.id
     }
   }
   depends_on = [
