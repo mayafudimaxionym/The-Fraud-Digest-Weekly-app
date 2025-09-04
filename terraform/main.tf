@@ -134,8 +134,8 @@ resource "google_cloud_run_v2_service" "backend_service" {
   name                = "fraud-analysis-processor-v2"
   location            = var.gcp_region
   deletion_protection = false
-  # ADDED: Explicitly set ingress to allow traffic from Pub/Sub
-  ingress             = "INGRESS_TRAFFIC_INTERNAL_AND_CLOUD_LOAD_BALANCING"
+  # CORRECTED: Use the correct ingress setting for v2 services
+  ingress             = "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER"
   template {
     service_account = google_service_account.backend_sa.email
     containers {
