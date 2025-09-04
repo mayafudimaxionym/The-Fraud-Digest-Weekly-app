@@ -17,7 +17,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Stage 4: Copy the backend application code
 COPY . .
 
-# Stage 5: Define the command to run the application using the Functions Framework.
-# This is the standard way to run a function designed with this framework.
-# Cloud Run provides the $PORT environment variable.
-CMD exec functions-framework --target=main --signature-type=cloudevent --port=$PORT
+# Stage 5: Define the command to run the application.
+# --source specifies the file, which makes the framework map the function to the root path (/).
+# --target specifies the function name to run.
+# --signature-type=http is used for direct HTTP invocations.
+CMD exec functions-framework --source=main.py --target=main --signature-type=http --port=$PORT
