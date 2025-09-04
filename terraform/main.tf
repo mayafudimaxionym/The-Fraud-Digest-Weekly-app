@@ -134,7 +134,8 @@ resource "google_cloud_run_v2_service" "backend_service" {
   name                = "fraud-analysis-processor-v2"
   location            = var.gcp_region
   deletion_protection = false
-  ingress             = "INGRESS_TRAFFIC_INTERNAL_ONLY"
+  # ADDED: Explicitly set ingress to allow traffic from Pub/Sub
+  ingress             = "INGRESS_TRAFFIC_INTERNAL_AND_CLOUD_LOAD_BALANCING"
   template {
     service_account = google_service_account.backend_sa.email
     containers {
@@ -150,14 +151,11 @@ resource "google_cloud_run_v2_service" "backend_service" {
 }
 
 // --- Pub/Sub Push Subscription ---
-// Create a dedicated service account for Pub/Sub to use for push authentication
 resource "google_service_account" "pubsub_push_sa" {
   project      = var.gcp_project_id
   account_id   = "pubsub-push-invoker-sa"
   display_name = "Pub/Sub Push Invoker SA"
 }
-
-// Grant this new SA the permission to invoke our backend service
 resource "google_cloud_run_v2_service_iam_member" "pubsub_invoker" {
   project  = google_cloud_run_v2_service.backend_service.project
   location = google_cloud_run_v2_service.backend_service.location
@@ -165,29 +163,22 @@ resource "google_cloud_run_v2_service_iam_member" "pubsub_invoker" {
   role     = "roles/run.invoker"
   member   = "serviceAccount:${google_service_account.pubsub_push_sa.email}"
 }
-
-// Grant the Google-managed Pub/Sub service agent permission to impersonate our push SA
 resource "google_service_account_iam_member" "pubsub_impersonator" {
   service_account_id = google_service_account.pubsub_push_sa.name
   role               = "roles/iam.serviceAccountTokenCreator"
   member             = "serviceAccount:service-${data.google_project.project.number}@gcp-sa-pubsub.iam.gserviceaccount.com"
 }
-
-// Create the Push subscription
 resource "google_pubsub_subscription" "backend_push_subscription" {
   project              = var.gcp_project_id
   name                 = "backend-push-subscription"
   topic                = google_pubsub_topic.jobs_topic.name
   ack_deadline_seconds = 60
-
   push_config {
     push_endpoint = google_cloud_run_v2_service.backend_service.uri
-
     oidc_token {
       service_account_email = google_service_account.pubsub_push_sa.email
     }
   }
-
   depends_on = [google_cloud_run_v2_service_iam_member.pubsub_invoker]
 }
 
