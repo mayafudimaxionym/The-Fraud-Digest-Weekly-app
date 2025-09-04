@@ -2,20 +2,14 @@
 
 terraform {
   required_providers {
-    google = {
-      source  = "hashicorp/google"
-      version = ">= 4.50.0"
-    }
+    google = { source = "hashicorp/google", version = ">= 4.50.0" }
   }
 }
-
 provider "google" {
   project = var.gcp_project_id
   region  = var.gcp_region
 }
-
-// ... (APIs, Shared Infra, Frontend Infra - все без изменений) ...
-// === APIs ===
+// ... (APIs, Shared Infra, Frontend Infra - без изменений) ...
 resource "google_project_service" "apis" {
   for_each           = toset(var.gcp_service_list)
   project            = var.gcp_project_id
@@ -23,17 +17,11 @@ resource "google_project_service" "apis" {
   disable_on_destroy = false
 }
 resource "google_project_service" "extra_apis" {
-  for_each = toset([
-    "iap.googleapis.com",
-    "eventarc.googleapis.com",
-    "firestore.googleapis.com"
-  ])
+  for_each = toset(["iap.googleapis.com", "eventarc.googleapis.com", "firestore.googleapis.com"])
   project            = var.gcp_project_id
   service            = each.key
   disable_on_destroy = false
 }
-
-// === Shared Infrastructure ===
 resource "google_pubsub_topic" "jobs_topic" {
   project    = var.gcp_project_id
   name       = var.pubsub_topic_id
@@ -56,10 +44,6 @@ resource "google_firestore_database" "database" {
   type        = "FIRESTORE_NATIVE"
   depends_on  = [google_project_service.extra_apis]
 }
-
-// =================================================
-// === FRONTEND INFRASTRUCTURE (Cloud Run + IAP) ===
-// =================================================
 resource "google_iap_client" "project_client" {
   display_name = "Fraud Digest IAP Client"
   brand        = "projects/963241002796/brands/963241002796"
@@ -89,14 +73,8 @@ resource "google_cloud_run_v2_service" "frontend_service" {
     containers {
       image = "us-docker.pkg.dev/cloudrun/container/hello"
       resources { limits = { cpu = "1000m", memory = "512Mi" } }
-      env {
-        name  = "GCP_PROJECT_ID"
-        value = var.gcp_project_id
-      }
-      env {
-        name  = "PUBSUB_TOPIC_ID"
-        value = var.pubsub_topic_id
-      }
+      env { name = "GCP_PROJECT_ID", value = var.gcp_project_id }
+      env { name = "PUBSUB_TOPIC_ID", value = var.pubsub_topic_id }
     }
   }
   lifecycle { ignore_changes = all }
@@ -113,31 +91,21 @@ resource "google_cloud_run_v2_service_iam_member" "iap_invoker" {
 // ===================================================
 // === BACKEND INFRASTRUCTURE (Cloud Run + Pub/Sub Push) ===
 // ===================================================
-resource "google_service_account" "backend_sa" {
-  project      = var.gcp_project_id
-  account_id   = "fraud-digest-backend-sa"
-  display_name = "Service Account for Fraud Digest Backend"
-  description  = ""
-}
-resource "google_project_iam_member" "backend_roles" {
-  for_each = toset([
-    "roles/aiplatform.user",
-    "roles/secretmanager.secretAccessor",
-    "roles/datastore.user"
-  ])
-  project = var.gcp_project_id
-  role    = each.key
-  member  = "serviceAccount:${google_service_account.backend_sa.email}"
-}
+# We no longer create a separate SA for the backend.
+# resource "google_service_account" "backend_sa" { ... }
+
+# We assume the deployer SA already has the necessary roles (Editor, etc.)
+# resource "google_project_iam_member" "backend_roles" { ... }
+
 resource "google_cloud_run_v2_service" "backend_service" {
   project             = var.gcp_project_id
   name                = "fraud-analysis-processor-v2"
   location            = var.gcp_region
   deletion_protection = false
-  # CORRECTED: Use the correct ingress setting for v2 services
   ingress             = "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER"
   template {
-    service_account = google_service_account.backend_sa.email
+    # Use the main deployer service account
+    service_account = var.gcp_sa_email
     containers {
       image = "us-docker.pkg.dev/cloudrun/container/hello"
       env {
@@ -147,7 +115,6 @@ resource "google_cloud_run_v2_service" "backend_service" {
     }
   }
   lifecycle { ignore_changes = all }
-  depends_on = [google_project_iam_member.backend_roles]
 }
 
 // --- Pub/Sub Push Subscription ---
@@ -182,12 +149,9 @@ resource "google_pubsub_subscription" "backend_push_subscription" {
   depends_on = [google_cloud_run_v2_service_iam_member.pubsub_invoker]
 }
 
-// Data source to get the project number
 data "google_project" "project" {
   project_id = var.gcp_project_id
 }
-
-// === Outputs ===
 output "frontend_service_url" {
   value = google_cloud_run_v2_service.frontend_service.uri
 }

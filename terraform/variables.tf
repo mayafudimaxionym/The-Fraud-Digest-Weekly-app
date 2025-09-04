@@ -48,3 +48,10 @@ variable "gcp_support_email" {
   default     = "maya.fudim@axionym.com"
 }
 
+// terraform/variables.tf
+// ... (остальные переменные) ...
+
+variable "gcp_sa_email" {
+  type        = string
+  description = "The email of the service account used for deployment."
+}

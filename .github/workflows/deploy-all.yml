@@ -41,6 +41,7 @@ jobs:
         run: |
           terraform -chdir=./terraform plan -input=false -out=tfplan \
             -var="gcp_project_id=${{ env.GCP_PROJECT_ID }}"
+            -var="gcp_sa_email=${{ secrets.GCP_SA_EMAIL }}" # <-- ADD THIS LINE
       - name: Terraform Apply
         run: terraform -chdir=./terraform apply -input=false -auto-approve "tfplan"
 
