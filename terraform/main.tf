@@ -9,7 +9,7 @@ provider "google" {
   project = var.gcp_project_id
   region  = var.gcp_region
 }
-// ... (APIs, Shared Infra, Frontend Infra - без изменений) ...
+// === APIs ===
 resource "google_project_service" "apis" {
   for_each           = toset(var.gcp_service_list)
   project            = var.gcp_project_id
@@ -22,6 +22,7 @@ resource "google_project_service" "extra_apis" {
   service            = each.key
   disable_on_destroy = false
 }
+// === Shared Infrastructure ===
 resource "google_pubsub_topic" "jobs_topic" {
   project    = var.gcp_project_id
   name       = var.pubsub_topic_id
@@ -44,6 +45,9 @@ resource "google_firestore_database" "database" {
   type        = "FIRESTORE_NATIVE"
   depends_on  = [google_project_service.extra_apis]
 }
+// =================================================
+// === FRONTEND INFRASTRUCTURE (Cloud Run + IAP) ===
+// =================================================
 resource "google_iap_client" "project_client" {
   display_name = "Fraud Digest IAP Client"
   brand        = "projects/963241002796/brands/963241002796"
@@ -73,8 +77,14 @@ resource "google_cloud_run_v2_service" "frontend_service" {
     containers {
       image = "us-docker.pkg.dev/cloudrun/container/hello"
       resources { limits = { cpu = "1000m", memory = "512Mi" } }
-      env { name = "GCP_PROJECT_ID", value = var.gcp_project_id }
-      env { name = "PUBSUB_TOPIC_ID", value = var.pubsub_topic_id }
+      env {
+        name  = "GCP_PROJECT_ID"
+        value = var.gcp_project_id
+      }
+      env {
+        name  = "PUBSUB_TOPIC_ID"
+        value = var.pubsub_topic_id
+      }
     }
   }
   lifecycle { ignore_changes = all }
@@ -87,16 +97,9 @@ resource "google_cloud_run_v2_service_iam_member" "iap_invoker" {
   role     = "roles/run.invoker"
   member   = "user:${var.gcp_support_email}"
 }
-
 // ===================================================
 // === BACKEND INFRASTRUCTURE (Cloud Run + Pub/Sub Push) ===
 // ===================================================
-# We no longer create a separate SA for the backend.
-# resource "google_service_account" "backend_sa" { ... }
-
-# We assume the deployer SA already has the necessary roles (Editor, etc.)
-# resource "google_project_iam_member" "backend_roles" { ... }
-
 resource "google_cloud_run_v2_service" "backend_service" {
   project             = var.gcp_project_id
   name                = "fraud-analysis-processor-v2"
@@ -104,7 +107,6 @@ resource "google_cloud_run_v2_service" "backend_service" {
   deletion_protection = false
   ingress             = "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER"
   template {
-    # Use the main deployer service account
     service_account = var.gcp_sa_email
     containers {
       image = "us-docker.pkg.dev/cloudrun/container/hello"
@@ -116,7 +118,6 @@ resource "google_cloud_run_v2_service" "backend_service" {
   }
   lifecycle { ignore_changes = all }
 }
-
 // --- Pub/Sub Push Subscription ---
 resource "google_service_account" "pubsub_push_sa" {
   project      = var.gcp_project_id
@@ -148,7 +149,6 @@ resource "google_pubsub_subscription" "backend_push_subscription" {
   }
   depends_on = [google_cloud_run_v2_service_iam_member.pubsub_invoker]
 }
-
 data "google_project" "project" {
   project_id = var.gcp_project_id
 }
